@@ -228,7 +228,7 @@ class ColorLegendBar(SimpleRect):
 
         self.legend_label = arcade.Text(
             text="Current Category Legend: ",
-            start_x=Layout.COLOR_LEGEND_BAR_LEFT,
+            start_x=Layout.ZOOM_DATE_RANGE_DISPLAY_BAR_LEFT,  # align with the start of the date range bar
             start_y=0,
             color=arcade.color.WHITE,
             font_name=Theme.FONT_NAME,
@@ -240,7 +240,7 @@ class ColorLegendBar(SimpleRect):
         x_offsets: Dict[str, int] = dict()
         for category in [e.value for e in IntervalCategory]:
             self.legends[category] = list()
-            x_offsets[category] = Layout.COLOR_LEGEND_BAR_LEFT + self.legend_label.content_width + 4  # When a category is display, each entry needs to shift by an offset
+            x_offsets[category] = Layout.ZOOM_DATE_RANGE_DISPLAY_BAR_LEFT + self.legend_label.content_width + 4  # When a category is display, each entry needs to shift by an offset
 
         for classification in self.classifications:
             category_value = classification.category.value
@@ -572,7 +572,15 @@ class ZoomScrollBar(SimpleRect):
         self.graph_section = graph_section
         self.scroll_percent = 0.0
         self.window = self.graph_section.window
+        self.current_scrolled_y_rows = 0
+        self.current_rows_per_page = 0
+        self.scrollable_row_count = 1
         self.on_resize()
+
+    def on_scrolling_change(self, current_scrolled_y_rows: int, current_rows_per_page: int, available_row_count: int):
+        self.current_scrolled_y_rows = current_scrolled_y_rows
+        self.scrollable_row_count = max(1, available_row_count - current_rows_per_page + 2)  # prevent divide by zero
+        self.current_rows_per_page = current_rows_per_page
 
     def on_resize(self):
         self.position(
@@ -584,6 +592,18 @@ class ZoomScrollBar(SimpleRect):
 
     def draw(self):
         super().draw()
+        if self.scrollable_row_count > 0:
+            handle_height_px = min(self.height, int(self.current_rows_per_page / self.scrollable_row_count * self.height))  # the handle should shrink as the rows on the page represent a smaller fraction of available rows
+            available_scroll_bar_height = self.height - handle_height_px
+            handle_y_percentage = self.current_scrolled_y_rows / self.scrollable_row_count  # % distance from the top
+            handle_y_offset = handle_y_percentage * available_scroll_bar_height
+            arcade.draw_lrtb_rectangle_filled(
+                left=self.left,
+                right=self.right,
+                top=self.top - handle_y_offset,
+                bottom=self.top - handle_y_offset - handle_height_px,
+                color=arcade.color.DARK_GRAY
+            )
 
 
 class CategoryBar(SimpleRect):
@@ -707,7 +727,7 @@ class GraphSection(arcade.Section):
         # self.row_height_px = 10
         self.row_height_px = 3
         self.rows_to_display = 0
-        self.scroll_y_rows = 0  # How many rows we have scrolled past
+        self._scroll_y_rows = 0  # How many rows we have scrolled past
 
         self.keys_down = set()
         # When this value is <= 0, the action desired by a key being held down will be
@@ -757,10 +777,27 @@ class GraphSection(arcade.Section):
         print(f'loaded: {group_id}')
         return interval_timeline
 
+    @property
+    def scroll_y_rows(self):
+        return self._scroll_y_rows
+
+    @scroll_y_rows.setter
+    def scroll_y_rows(self, val):
+        if val < 0:
+            val = 0
+
+        self._scroll_y_rows = val
+        self.resize_scroll_bar()
+
+    def resize_scroll_bar(self):
+        self.zoom_scroll_bar.on_scrolling_change(
+            current_scrolled_y_rows=self.scroll_y_rows,
+            current_rows_per_page=self.calc_rows_to_display(),
+            available_row_count=len(self.ei.grouped_intervals.groups.keys())
+        )
+
     def scroll_down_by_rows(self, count: int):
         self.scroll_y_rows += count
-        if self.scroll_y_rows < 0:
-            self.scroll_y_rows = 0
 
     def on_mouse_scroll(self, x: int, y: int, scroll_x: int, scroll_y: int):
         self.scroll_down_by_rows(-1 * int(scroll_y // 2))
@@ -806,7 +843,7 @@ class GraphSection(arcade.Section):
             self.scroll_y_rows = 0
 
         if arcade.key.END in self.keys_down:
-            self.scroll_y_rows = -1
+            self.scroll_y_rows = len(self.ei.grouped_intervals.groups.keys())
 
         if arcade.key.R in self.keys_down:
             self.zoom_to_dates(self.ei.absolute_timeline_start, self.ei.absolute_timeline_stop)
@@ -854,9 +891,11 @@ class GraphSection(arcade.Section):
 
         if arcade.key.NUM_ADD in self.keys_down:
             self.row_height_px = min(self.row_height_px + 2, 25)
+            self.resize_scroll_bar()
 
         if arcade.key.NUM_SUBTRACT in self.keys_down:
             self.row_height_px = max(self.row_height_px - 2, 2)
+            self.resize_scroll_bar()
 
         if delay_until_next is None:
             self.time_until_next_process_keys_down = GraphSection.PERIOD_BETWEEN_REACTION_TO_KEY_DOWN
@@ -876,6 +915,7 @@ class GraphSection(arcade.Section):
         self.zoom_date_range_display_bar.on_resize()
         self.category_bar.on_resize()
         self.zoom_scroll_bar.on_resize()
+        self.resize_scroll_bar()  # Trigger a scroll bar handle re-calculation
 
     def calc_rows_to_display(self) -> int:
         """
@@ -892,8 +932,10 @@ class GraphSection(arcade.Section):
         # many we can fit in the graph area.
         rows_to_display = self.calc_rows_to_display()
         available_timelines_ids = list(self.ei.grouped_intervals.groups.keys())
-        if self.scroll_y_rows > len(available_timelines_ids) or self.scroll_y_rows == -1:
-            self.scroll_y_rows = max(0, len(available_timelines_ids) - 2)
+
+        # If the user has hit END or scrolled to the end of the data, show the last full page
+        if self.scroll_y_rows > len(available_timelines_ids) - self.calc_rows_to_display():
+            self.scroll_y_rows = max(0, len(available_timelines_ids) - self.calc_rows_to_display())
 
         row_id_tuples_to_render = available_timelines_ids[self.scroll_y_rows:self.scroll_y_rows+rows_to_display]
 

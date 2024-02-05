@@ -105,7 +105,7 @@ class DetailSection(arcade.Section):
             # If the mouse is over an interval, describe the interval times
             interval = self.mouse_over_interval
             delta = humanize_timedelta(datetime.timedelta(seconds=interval["duration"]))
-            text += f'    Interval[ ({interval["from"]})  ->  ({interval["to"]})  Δ:({delta}) ]'
+            text += f'    Interval[ {interval["classification"].display_name} ({interval["from"]})  ->  ({interval["to"]})  Δ:({delta}) ]'
 
         self.mouse_over_time_dt = dt
         self.mouse_over_time_text.text = text
@@ -542,8 +542,13 @@ class IntervalsTimeline:
                         over_intervals_df = df[(moment >= df['from']) & (moment <= df['to'])]
                         if not over_intervals_df.empty:
                             # The mouse is over one or more intervals in the timeline.
-                            # In theory, there should only be one, so grab the first.
-                            over_interval = over_intervals_df.iloc[0]
+                            # Select the last one in the list since the analysis module sorts
+                            # based on from, the last one in the list should be the one that started
+                            # most closely to the mouse point and the one that visually occupies the
+                            # screen. i.e. if there are overlapping intervals in the timeline, the
+                            # newer one will paint over the order as rendering progresses left->right
+                            # in the timeline draw.
+                            over_interval = over_intervals_df.iloc[-1]
                             detail_section_ref.set_mouse_over_interval(over_interval)
                             self.interval_under_mouse = over_interval
                         else:

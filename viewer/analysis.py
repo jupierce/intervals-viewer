@@ -79,7 +79,7 @@ class EventsInspector:
         self.absolute_timeline_stop: pd.Timestamp = (events_df['to'].max()).ceil('min')
 
         # Order rows by category, locator, then make sure all rows are in chronological order
-        self.events_df = self.events_df.sort_values(['category', 'locator', 'to'], ascending=True)
+        self.events_df = self.events_df.sort_values(['category', 'locator', 'from'], ascending=True)
 
         self.total_timeline_ns = int((self.absolute_timeline_start - self.absolute_timeline_start).to_timedelta64())
 

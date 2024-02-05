@@ -7,7 +7,8 @@ import arcade
 
 from typing import Optional, List, Tuple, Dict
 
-from viewer import SimpleRect, EventsInspector, Layout, humanize_timedelta, Theme, make_color_brighter, IntervalAnalyzer
+from viewer import SimpleRect, EventsInspector, Layout, humanize_timedelta, Theme, make_color_brighter
+from viewer.intervals import IntervalAnalyzer, IntervalCategory
 
 INIT_SCREEN_WIDTH = 500
 INIT_SCREEN_HEIGHT = 500
@@ -36,6 +37,7 @@ class DetailSection(arcade.Section):
                                                              )
 
         # When the mouse is over a specific timeline, shows information pertinent to all intervals in that timeline (locator information)
+        self.mouse_over_intervals: Optional[pd.DataFrame] = None  # represents the timeline intervals the mouse is currently over
         self.mouse_over_timeline_text: arcade.Text = arcade.Text('Wq',
                                                                  start_x=2,
                                                                  start_y=self.mouse_over_time_text.y - self.mouse_over_time_text.content_height,  # Uses time_info as content height clue for own positioning
@@ -109,6 +111,7 @@ class DetailSection(arcade.Section):
         self.mouse_over_time_text.text = text
 
     def set_mouse_over_intervals(self, pd_interval_rows: pd.DataFrame):
+        self.mouse_over_intervals = pd_interval_rows
         interval = pd_interval_rows.iloc[0]  # get the first interval in the timeline
         lines: List[str] = list()
 
@@ -178,6 +181,31 @@ class DetailSection(arcade.Section):
 # Since different components all want to write different detail,
 # store a global reference once we initialize.
 detail_section_ref: Optional[DetailSection] = None
+
+
+class ColorLegendBar(SimpleRect):
+
+    def __init__(self, graph_section: arcade.Section, ei: EventsInspector):
+        super().__init__(color=arcade.color.BLACK)
+        self.ei = ei
+        self.graph_section = graph_section
+        self.window = self.graph_section.window
+        self.on_resize()
+
+    def on_resize(self):
+        self.position(
+            left=Layout.COLOR_LEGEND_BAR_LEFT,
+            right=self.window.width - Layout.COLOR_LEGEND_BAR_RIGHT_OFFSET,
+            height=Layout.COLOR_LEGEND_BAR_HEIGHT,
+            top=self.window.height - Layout.COLOR_LEGEND_BAR_TOP_OFFSET
+        )
+
+    def draw(self):
+        super().draw()
+        mouse_over_intervals = detail_section_ref.mouse_over_intervals
+        if mouse_over_intervals is not None:
+            first_interval = mouse_over_intervals.iloc[0]
+            category: IntervalCategory = first_interval['category']
 
 
 class ZoomDateRangeDisplayBar(SimpleRect):
@@ -579,6 +607,7 @@ class GraphSection(arcade.Section):
     def __init__(self, ei: EventsInspector, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.ei = ei
+        self.color_legend_bar = ColorLegendBar(self, ei)
         self.zoom_date_range_display_bar = ZoomDateRangeDisplayBar(self, ei)
         self.category_bar = CategoryBar(self, ei)
         self.zoom_scroll_bar = ZoomScrollBar(self)
@@ -756,6 +785,7 @@ class GraphSection(arcade.Section):
         pass
 
     def on_resize(self, width: int, height: int):
+        self.color_legend_bar.on_resize()
         self.zoom_date_range_display_bar.on_resize()
         self.category_bar.on_resize()
         self.zoom_scroll_bar.on_resize()
@@ -768,6 +798,7 @@ class GraphSection(arcade.Section):
 
     def on_draw(self):
         arcade.set_background_color(arcade.color.BLUE)
+        self.color_legend_bar.draw()
         self.zoom_date_range_display_bar.draw()
 
         # If the minimum height of each row is ?px, then figure out how

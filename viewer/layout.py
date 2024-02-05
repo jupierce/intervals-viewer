@@ -4,7 +4,7 @@ import arcade
 class Theme:
     COLOR_HIGHLIGHTED_CATEGORY_SECTION = arcade.color.AERO_BLUE
     FONT_SIZE_DETAILS_SECTION = 10
-    FONT_NAME = ('Monospace', 'Courier New', 'Consolas', 'Console', 'Roboto Mono', 'Menlo')
+    FONT_NAME = ('Source Code Pro', 'Monospace', 'Courier New', 'Consolas', 'Console', 'Roboto Mono', 'Menlo')
     COLOR_CROSS_HAIR_LINES = (255, 255, 0, 175)
     COLOR_TIMELINE_BACKGROUND = arcade.color.BLACK
 

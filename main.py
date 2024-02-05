@@ -7,7 +7,7 @@ import arcade
 
 from typing import Optional, List, Tuple, Dict
 
-from viewer import SimpleRect, EventsInspector, Layout, humanize_timedelta, Theme, make_color_brighter
+from viewer import SimpleRect, EventsInspector, Layout, humanize_timedelta, Theme, make_color_brighter, IntervalAnalyzer
 
 INIT_SCREEN_WIDTH = 500
 INIT_SCREEN_HEIGHT = 500
@@ -110,17 +110,6 @@ class DetailSection(arcade.Section):
 
     def set_mouse_over_intervals(self, pd_interval_rows: pd.DataFrame):
         interval = pd_interval_rows.iloc[0]  # get the first interval in the timeline
-
-        def locator_val(attr_nname: str) -> str:
-            val = interval[f'tempStructuredLocator.{attr_nname}']
-            if pd.isnull(val):
-                return ''
-            return val
-
-        def locator_key_val(key_name: str) -> str:
-            return locator_val(f'keys.{key_name}')
-
-        locator_type = locator_val('type')
         lines: List[str] = list()
 
         def add_displayed_value(display_name: str, val: str):
@@ -129,16 +118,23 @@ class DetailSection(arcade.Section):
                 lines.append(f'{display_name:<{12}}: {val}')
 
         def add_non_empty_key_line(display_name: str, key_name: str):
-            nonlocal lines
-            val = locator_key_val(key_name)
+            val = IntervalAnalyzer.get_locator_key(interval, key_name)
             add_displayed_value(display_name, val)
 
-        for common_keys in ('backend-disruption-name', 'connection', 'disruption', 'alert', 'clusteroperator', 'namespace', 'node', 'pod', 'container'):
-            add_non_empty_key_line(common_keys.capitalize(), common_keys)
+        common_keys = IntervalAnalyzer.get_locator_key_names(interval)
+
+        # These keys are aggregated into a single line.
+        id_keys = ['uid', 'hmsg']
+        for id_key in id_keys:
+            if id_key in common_keys:
+                common_keys.remove(id_key)
+
+        for common_key in common_keys:
+            add_non_empty_key_line(common_key.capitalize(), common_key)
 
         id_str: str = ''
-        for id_key in ['uid', 'hmsg']:
-            val = locator_key_val(id_key)
+        for id_key in id_keys:
+            val = IntervalAnalyzer.get_locator_key(interval, id_key)
             if val:
                 id_str += f'[{id_key}={val}]'
 
@@ -149,18 +145,11 @@ class DetailSection(arcade.Section):
 
     def set_mouse_over_interval(self, interval: Optional[pd.Series]):
         self.mouse_over_interval = interval
+
         if interval is None:
+            # The interval is being cleared. Clear the text in the detail section.
             self.mouse_over_interval_text.text = ''
             return
-
-        def message_val(attr_name: str) -> str:
-            val = interval[f'tempStructuredMessage.{attr_name}']
-            if pd.isnull(val):
-                return ''
-            return val
-
-        def annotation_val(key_name: str) -> str:
-            return message_val(f'annotations.{key_name}')
 
         lines: List[str] = list()
 
@@ -170,19 +159,17 @@ class DetailSection(arcade.Section):
                 lines.append(f'{display_name:<{12}}: {val}')
 
         def add_message_attr_line(display_name: str, attr_name: str):
-            nonlocal lines
-            val = message_val(attr_name)
+            val = IntervalAnalyzer.get_message_attr(interval, attr_name)
             add_displayed_value(display_name, val)
 
-        def add_annotation_line(display_name: str, key_name: str):
-            nonlocal lines
-            val = annotation_val(key_name)
+        def add_annotation_line(display_name: str, annotation_name: str):
+            val = IntervalAnalyzer.get_message_annotation(interval, annotation_name)
             add_displayed_value(display_name, val)
 
-        for common_message_attr in ('reason', 'cause'):
+        for common_message_attr in ('cause',):  # 'reason' is duplicated in annotations, so don't print here.
             add_message_attr_line(common_message_attr.capitalize(), common_message_attr)
 
-        for common_annotation_keys in ('condition', 'status', 'alertstate', 'severity', 'constructed', 'node', 'count', 'pathological'):
+        for common_annotation_keys in IntervalAnalyzer.get_message_annotation_names(interval):
             add_annotation_line(common_annotation_keys.capitalize(), common_annotation_keys)
 
         self.mouse_over_interval_text.text = '\n'.join(lines)
@@ -750,7 +737,7 @@ class GraphSection(arcade.Section):
                 self.mouse_button_active_drag = dict()
 
         if arcade.key.NUM_ADD in self.keys_down:
-            self.row_height_px = min(self.row_height_px + 2, 15)
+            self.row_height_px = min(self.row_height_px + 2, 25)
 
         if arcade.key.NUM_SUBTRACT in self.keys_down:
             self.row_height_px = max(self.row_height_px - 2, 2)

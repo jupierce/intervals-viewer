@@ -110,9 +110,11 @@ class SimpleIntervalMatcher:
 
 class IntervalClassification:
 
-    def __init__(self, category: IntervalCategory, color: Optional[arcade.Color] = arcade.color.GRAY,
+    def __init__(self, display_name: str,
+                 category: IntervalCategory, color: Optional[arcade.Color] = arcade.color.GRAY,
                  series_matcher: Optional[Callable[[pd.Series], bool]] = None,
                  simple_series_matcher: Optional[SimpleIntervalMatcher] = None):
+        self.display_name = display_name
         self.category = category
         self.color = color
         self.does_series_match = series_matcher
@@ -145,7 +147,9 @@ class IntervalClassifications(Enum):
 
     # KubeEvents
     PathologicalKnown = IntervalClassification(
-        IntervalCategory.KubeEvent, color=hex_to_color('#0000ff'),
+        display_name='PathologicalKnown',
+        category=IntervalCategory.KubeEvent,
+        color=hex_to_color('#0000ff'),
         simple_series_matcher=SimpleIntervalMatcher(
             temp_source='KubeEvent',
             annotations_match={
@@ -156,7 +160,9 @@ class IntervalClassifications(Enum):
     )
 
     InterestingEvent = IntervalClassification(
-        IntervalCategory.KubeEvent, color=hex_to_color('#6E6E6E'),
+        display_name='InterestingEvent',
+        category=IntervalCategory.KubeEvent,
+        color=hex_to_color('#6E6E6E'),
         simple_series_matcher=SimpleIntervalMatcher(
             temp_source='KubeEvent',
             annotations_match={
@@ -167,7 +173,9 @@ class IntervalClassifications(Enum):
     PathologicalNew = IntervalClassification(
         # PathologicalKnown will capture if interesting=true. New will fall through
         # and be captured here.
-        IntervalCategory.KubeEvent, color=hex_to_color('#d0312d'),
+        display_name='PathologicalNew',
+        category=IntervalCategory.KubeEvent,
+        color=hex_to_color('#d0312d'),
         simple_series_matcher=SimpleIntervalMatcher(
             temp_source='KubeEvent',
             annotations_match={
@@ -178,7 +186,8 @@ class IntervalClassifications(Enum):
 
     # Alerts
     AlertPending = IntervalClassification(
-        IntervalCategory.Alert, color=hex_to_color('#fada5e'),
+        display_name='AlertPending',
+        category=IntervalCategory.Alert, color=hex_to_color('#fada5e'),
         simple_series_matcher=SimpleIntervalMatcher(
             temp_source='Alert',
             annotations_match={
@@ -187,7 +196,8 @@ class IntervalClassifications(Enum):
         )
     )
     AlertInfo = IntervalClassification(
-        IntervalCategory.Alert, color=hex_to_color('#fada5e'),
+        display_name='AlertInfo',
+        category=IntervalCategory.Alert, color=hex_to_color('#fada5e'),
         simple_series_matcher=SimpleIntervalMatcher(
             temp_source='Alert',
             annotations_match={
@@ -196,7 +206,8 @@ class IntervalClassifications(Enum):
         )
     )
     AlertWarning = IntervalClassification(
-        IntervalCategory.Alert, color=hex_to_color('#ffa500'),
+        display_name='AlertWarning',
+        category=IntervalCategory.Alert, color=hex_to_color('#ffa500'),
         simple_series_matcher=SimpleIntervalMatcher(
             temp_source='Alert',
             annotations_match={
@@ -205,7 +216,8 @@ class IntervalClassifications(Enum):
         )
     )
     AlertCritical = IntervalClassification(
-        IntervalCategory.Alert, color=hex_to_color('#d0312d'),
+        display_name='AlertCritical',
+        category=IntervalCategory.Alert, color=hex_to_color('#d0312d'),
         simple_series_matcher=SimpleIntervalMatcher(
             temp_source='Alert',
             annotations_match={
@@ -216,7 +228,8 @@ class IntervalClassifications(Enum):
 
     # Operator
     OperatorUnavailable = IntervalClassification(
-        IntervalCategory.OperatorState, color=hex_to_color('#d0312d'),
+        display_name='OperatorUnavailable',
+        category=IntervalCategory.OperatorState, color=hex_to_color('#d0312d'),
         simple_series_matcher=SimpleIntervalMatcher(
             temp_source='OperatorState',
             annotations_match={
@@ -226,7 +239,8 @@ class IntervalClassifications(Enum):
         )
     )
     OperatorDegraded = IntervalClassification(
-        IntervalCategory.OperatorState, color=hex_to_color('#ffa500'),
+        display_name='OperatorDegraded',
+        category=IntervalCategory.OperatorState, color=hex_to_color('#ffa500'),
         simple_series_matcher=SimpleIntervalMatcher(
             temp_source='OperatorState',
             annotations_match={
@@ -236,7 +250,8 @@ class IntervalClassifications(Enum):
         )
     )
     OperatorProgressing = IntervalClassification(
-        IntervalCategory.OperatorState, color=hex_to_color('#fada5e'),
+        display_name='OperatorProgressing',
+        category=IntervalCategory.OperatorState, color=hex_to_color('#fada5e'),
         simple_series_matcher=SimpleIntervalMatcher(
             temp_source='OperatorState',
             annotations_match={
@@ -248,7 +263,8 @@ class IntervalClassifications(Enum):
 
     # Node
     NodeDrain = IntervalClassification(
-        IntervalCategory.NodeState, color=hex_to_color('#4294e6'),
+        display_name='NodeDrain',
+        category=IntervalCategory.NodeState, color=hex_to_color('#4294e6'),
         simple_series_matcher=SimpleIntervalMatcher(
             locator_type='Node',
             annotations_match={
@@ -257,7 +273,8 @@ class IntervalClassifications(Enum):
         )
     )
     NodeReboot = IntervalClassification(
-        IntervalCategory.NodeState, color=hex_to_color('#6aaef2'),
+        display_name='NodeReboot',
+        category=IntervalCategory.NodeState, color=hex_to_color('#6aaef2'),
         simple_series_matcher=SimpleIntervalMatcher(
             locator_type='Node',
             annotations_match={
@@ -266,7 +283,8 @@ class IntervalClassifications(Enum):
         )
     )
     NodeOperatingSystemUpdate = IntervalClassification(
-        IntervalCategory.NodeState, color=hex_to_color('#96cbff'),
+        display_name='NodeOperatingSystemUpdate',
+        category=IntervalCategory.NodeState, color=hex_to_color('#96cbff'),
         simple_series_matcher=SimpleIntervalMatcher(
             locator_type='Node',
             annotations_match={
@@ -275,7 +293,8 @@ class IntervalClassifications(Enum):
         )
     )
     NodeUpdate = IntervalClassification(
-        IntervalCategory.NodeState, color=hex_to_color('#1e7bd9'),
+        display_name='NodeUpdate',
+        category=IntervalCategory.NodeState, color=hex_to_color('#1e7bd9'),
         simple_series_matcher=SimpleIntervalMatcher(
             locator_type='Node',
             annotations_match={
@@ -284,7 +303,8 @@ class IntervalClassifications(Enum):
         )
     )
     NodeNotReady = IntervalClassification(
-        IntervalCategory.NodeState, color=hex_to_color('#fada5e'),
+        display_name='NodeNotReady',
+        category=IntervalCategory.NodeState, color=hex_to_color('#fada5e'),
         simple_series_matcher=SimpleIntervalMatcher(
             locator_type='Node',
             annotations_match={
@@ -295,7 +315,8 @@ class IntervalClassifications(Enum):
 
     # Tests
     TestPassed = IntervalClassification(
-        IntervalCategory.E2ETest, color=hex_to_color('#3cb043'),
+        display_name='TestPassed',
+        category=IntervalCategory.E2ETest, color=hex_to_color('#3cb043'),
         simple_series_matcher=SimpleIntervalMatcher(
             temp_source='E2ETest',
             annotations_match={
@@ -304,7 +325,8 @@ class IntervalClassifications(Enum):
         )
     )
     TestSkipped = IntervalClassification(
-        IntervalCategory.E2ETest, color=hex_to_color('#ceba76'),
+        display_name='TestSkipped',
+        category=IntervalCategory.E2ETest, color=hex_to_color('#ceba76'),
         simple_series_matcher=SimpleIntervalMatcher(
             temp_source='E2ETest',
             annotations_match={
@@ -313,7 +335,8 @@ class IntervalClassifications(Enum):
         )
     )
     TestFlaked = IntervalClassification(
-        IntervalCategory.E2ETest, color=hex_to_color('#ffa500'),
+        display_name='TestFlaked',
+        category=IntervalCategory.E2ETest, color=hex_to_color('#ffa500'),
         simple_series_matcher=SimpleIntervalMatcher(
             temp_source='E2ETest',
             annotations_match={
@@ -322,7 +345,8 @@ class IntervalClassifications(Enum):
         )
     )
     TestFailed = IntervalClassification(
-        IntervalCategory.E2ETest, color=hex_to_color('#d0312d'),
+        display_name='TestFailed',
+        category=IntervalCategory.E2ETest, color=hex_to_color('#d0312d'),
         simple_series_matcher=SimpleIntervalMatcher(
             temp_source='E2ETest',
             annotations_match={
@@ -333,7 +357,8 @@ class IntervalClassifications(Enum):
 
     # Pods
     PodCreated = IntervalClassification(
-        IntervalCategory.Pod, color=hex_to_color('#96cbff'),
+        display_name='PodCreated',
+        category=IntervalCategory.Pod, color=hex_to_color('#96cbff'),
         simple_series_matcher=SimpleIntervalMatcher(
             temp_source='PodState',
             annotations_match={
@@ -342,7 +367,8 @@ class IntervalClassifications(Enum):
         )
     )
     PodScheduled = IntervalClassification(
-        IntervalCategory.Pod, color=hex_to_color('#1e7bd9'),
+        display_name='PodScheduled',
+        category=IntervalCategory.Pod, color=hex_to_color('#1e7bd9'),
         simple_series_matcher=SimpleIntervalMatcher(
             temp_source='PodState',
             annotations_match={
@@ -351,7 +377,8 @@ class IntervalClassifications(Enum):
         )
     )
     PodTerminating = IntervalClassification(
-        IntervalCategory.Pod, color=hex_to_color('#ffa500'),
+        display_name='PodTerminating',
+        category=IntervalCategory.Pod, color=hex_to_color('#ffa500'),
         simple_series_matcher=SimpleIntervalMatcher(
             temp_source='PodState',
             annotations_match={
@@ -360,7 +387,8 @@ class IntervalClassifications(Enum):
         )
     )
     ContainerWait = IntervalClassification(
-        IntervalCategory.Pod, color=hex_to_color('#ca8dfd'),
+        display_name='ContainerWait',
+        category=IntervalCategory.Pod, color=hex_to_color('#ca8dfd'),
         simple_series_matcher=SimpleIntervalMatcher(
             temp_source='PodState',
             locator_keys_exist={'container'},
@@ -370,7 +398,8 @@ class IntervalClassifications(Enum):
         )
     )
     ContainerStart = IntervalClassification(
-        IntervalCategory.Pod, color=hex_to_color('#9300ff'),
+        display_name='ContainerStart',
+        category=IntervalCategory.Pod, color=hex_to_color('#9300ff'),
         simple_series_matcher=SimpleIntervalMatcher(
             temp_source='PodState',
             locator_keys_exist={'container'},
@@ -380,7 +409,8 @@ class IntervalClassifications(Enum):
         )
     )
     ContainerNotReady = IntervalClassification(
-        IntervalCategory.Pod, color=hex_to_color('#fada5e'),
+        display_name='ContainerNotReady',
+        category=IntervalCategory.Pod, color=hex_to_color('#fada5e'),
         simple_series_matcher=SimpleIntervalMatcher(
             temp_source='PodState',
             locator_keys_exist={'container'},
@@ -390,7 +420,8 @@ class IntervalClassifications(Enum):
         )
     )
     ContainerReady = IntervalClassification(
-        IntervalCategory.Pod, color=hex_to_color('#3cb043'),
+        display_name='ContainerReady',
+        category=IntervalCategory.Pod, color=hex_to_color('#3cb043'),
         simple_series_matcher=SimpleIntervalMatcher(
             temp_source='PodState',
             locator_keys_exist={'container'},
@@ -400,7 +431,8 @@ class IntervalClassifications(Enum):
         )
     )
     ContainerReadinessFailed = IntervalClassification(
-        IntervalCategory.Pod, color=hex_to_color('#d0312d'),
+        display_name='ContainerReadinessFailed',
+        category=IntervalCategory.Pod, color=hex_to_color('#d0312d'),
         simple_series_matcher=SimpleIntervalMatcher(
             temp_source='PodState',
             locator_keys_exist={'container'},
@@ -410,7 +442,8 @@ class IntervalClassifications(Enum):
         )
     )
     ContainerReadinessErrored = IntervalClassification(
-        IntervalCategory.Pod, color=hex_to_color('#d0312d'),
+        display_name='ContainerReadinessErrored',
+        category=IntervalCategory.Pod, color=hex_to_color('#d0312d'),
         simple_series_matcher=SimpleIntervalMatcher(
             temp_source='PodState',
             locator_keys_exist={'container'},
@@ -420,7 +453,8 @@ class IntervalClassifications(Enum):
         )
     )
     StartupProbeFailed = IntervalClassification(
-        IntervalCategory.Pod, color=hex_to_color('#c90076'),
+        display_name='StartupProbeFailed',
+        category=IntervalCategory.Pod, color=hex_to_color('#c90076'),
         simple_series_matcher=SimpleIntervalMatcher(
             temp_source='PodState',
             annotations_match={
@@ -431,28 +465,43 @@ class IntervalClassifications(Enum):
 
     # Disruption
     CIClusterDisruption = IntervalClassification(
-        IntervalCategory.Disruption, color=hex_to_color('#96cbff'),
+        display_name='CIClusterDisruption',
+        category=IntervalCategory.Disruption, color=hex_to_color('#96cbff'),
         simple_series_matcher=SimpleIntervalMatcher(
             temp_source='Disruption',
             message_contains='likely a problem in cluster running tests',
         )
     )
     Disruption = IntervalClassification(
-        IntervalCategory.Disruption, color=hex_to_color('#d0312d'),
+        display_name='Disruption',
+        category=IntervalCategory.Disruption, color=hex_to_color('#d0312d'),
         simple_series_matcher=SimpleIntervalMatcher(
             temp_source='Disruption',
         )
     )
 
     # Cargo cult from HTML. Cluster state? Not sure how to match.
-    Degraded = IntervalClassification(IntervalCategory.ClusterState, color=hex_to_color('#b65049'))
-    Upgradeable = IntervalClassification(IntervalCategory.ClusterState, color=hex_to_color('#32b8b6'))
-    StatusFalse = IntervalClassification(IntervalCategory.ClusterState, color=hex_to_color('#ffffff'))
-    StatusUnknown = IntervalClassification(IntervalCategory.ClusterState, color=hex_to_color('#bbbbbb'))
+    Degraded = IntervalClassification(
+        display_name='Degraded',
+        category=IntervalCategory.ClusterState, color=hex_to_color('#b65049')
+    )
+    Upgradeable = IntervalClassification(
+        display_name='Upgradeable',
+        category=IntervalCategory.ClusterState, color=hex_to_color('#32b8b6')
+    )
+    StatusFalse = IntervalClassification(
+        display_name='StatusFalse',
+        category=IntervalCategory.ClusterState, color=hex_to_color('#ffffff')
+    )
+    StatusUnknown = IntervalClassification(
+        display_name='StatusUnknown',
+        category=IntervalCategory.ClusterState, color=hex_to_color('#bbbbbb')
+    )
 
     # PodLog
     PodLogWarning = IntervalClassification(
-        IntervalCategory.PodLog, color=hex_to_color('#fada5e'),
+        display_name='PodLogWarning',
+        category=IntervalCategory.PodLog, color=hex_to_color('#fada5e'),
         simple_series_matcher=SimpleIntervalMatcher(
             temp_source={'PodLog', 'EtcdLog'},
             annotations_match={
@@ -461,7 +510,8 @@ class IntervalClassifications(Enum):
         )
     )
     PodLogError = IntervalClassification(
-        IntervalCategory.PodLog, color=hex_to_color('#d0312d'),
+        display_name='PodLogError',
+        category=IntervalCategory.PodLog, color=hex_to_color('#d0312d'),
         simple_series_matcher=SimpleIntervalMatcher(
             temp_source={'PodLog', 'EtcdLog'},
             annotations_match={
@@ -470,7 +520,8 @@ class IntervalClassifications(Enum):
         )
     )
     PodLogInfo = IntervalClassification(
-        IntervalCategory.PodLog, color=hex_to_color('#96cbff'),
+        display_name='PodLogInfo',
+        category=IntervalCategory.PodLog, color=hex_to_color('#96cbff'),
         simple_series_matcher=SimpleIntervalMatcher(
             temp_source={'PodLog', 'EtcdLog'},
             annotations_match={
@@ -479,7 +530,8 @@ class IntervalClassifications(Enum):
         )
     )
     PodLogOther = IntervalClassification(
-        IntervalCategory.PodLog, color=hex_to_color('#96cbff'),
+        display_name='PodLogOther',
+        category=IntervalCategory.PodLog, color=hex_to_color('#96cbff'),
         simple_series_matcher=SimpleIntervalMatcher(
             temp_source={'PodLog', 'EtcdLog'},
         )
@@ -489,7 +541,8 @@ class IntervalClassifications(Enum):
     # is guaranteed to execute last and sweep in anything not already
     # matched.
     UnknownClassification = IntervalClassification(
-        IntervalCategory.Unclassified, color=arcade.color.GRAY,
+        display_name='Unknown',
+        category=IntervalCategory.Unclassified, color=arcade.color.GRAY,
         series_matcher=lambda interval: True
     )
 

@@ -8,7 +8,7 @@ import arcade
 from typing import Optional, List, Tuple, Dict
 
 from viewer import SimpleRect, EventsInspector, Layout, humanize_timedelta, Theme, make_color_brighter
-from viewer.intervals import IntervalAnalyzer, IntervalCategory
+from viewer.intervals import IntervalAnalyzer, IntervalCategory, IntervalClassification, IntervalClassifications
 
 INIT_SCREEN_WIDTH = 500
 INIT_SCREEN_HEIGHT = 500
@@ -183,6 +183,39 @@ class DetailSection(arcade.Section):
 detail_section_ref: Optional[DetailSection] = None
 
 
+class ColorLegendEntry(SimpleRect):
+
+    def __init__(self, window: arcade.Window, classification: IntervalClassification):
+        super().__init__(color=classification.color)
+        self.window = window
+        self.classification = classification
+        self.font_size = 10
+        self.category_text = arcade.Text(
+            text=str(self.classification.display_name),
+            start_x=0,
+            start_y=0,
+            color=arcade.color.BLACK,
+            font_name=Theme.FONT_NAME,
+            font_size=self.font_size,
+        )
+        self.text_width = self.category_text.content_width
+        self.pos(0)
+
+    def pos(self, left: int):
+        self.position(
+            left=left,
+            right=left + self.text_width + 6,
+            top=self.window.height - Layout.COLOR_LEGEND_BAR_TOP_OFFSET,
+            height=Layout.COLOR_LEGEND_BAR_HEIGHT
+        )
+        self.category_text.x = left + 3
+        self.category_text.y = self.bottom + 4
+
+    def draw(self):
+        super().draw()
+        self.category_text.draw()
+
+
 class ColorLegendBar(SimpleRect):
 
     def __init__(self, graph_section: arcade.Section, ei: EventsInspector):
@@ -190,6 +223,35 @@ class ColorLegendBar(SimpleRect):
         self.ei = ei
         self.graph_section = graph_section
         self.window = self.graph_section.window
+
+        self.classifications: List[IntervalClassification] = [e.value for e in IntervalClassifications]
+
+        self.legend_label = arcade.Text(
+            text="Current Category Legend: ",
+            start_x=Layout.COLOR_LEGEND_BAR_LEFT,
+            start_y=0,
+            color=arcade.color.WHITE,
+            font_name=Theme.FONT_NAME,
+            font_size=10,
+            bold=True,
+        )
+
+        self.legends: Dict[IntervalCategory, List[ColorLegendEntry]] = dict()
+        x_offsets: Dict[str, int] = dict()
+        for category in [e.value for e in IntervalCategory]:
+            self.legends[category] = list()
+            x_offsets[category] = Layout.COLOR_LEGEND_BAR_LEFT + self.legend_label.content_width + 4  # When a category is display, each entry needs to shift by an offset
+
+        for classification in self.classifications:
+            category_value = classification.category.value
+            category_element_list = self.legends[category_value]
+            x_offset = x_offsets[category_value]
+            entry = ColorLegendEntry(self.window, classification)
+            category_element_list.append(entry)
+            entry.pos(x_offset)
+            x_offset += entry.width + 4  # 4px between legend entries
+            x_offsets[category_value] = x_offset  # Store the offset for the next entry's offset
+
         self.on_resize()
 
     def on_resize(self):
@@ -199,13 +261,20 @@ class ColorLegendBar(SimpleRect):
             height=Layout.COLOR_LEGEND_BAR_HEIGHT,
             top=self.window.height - Layout.COLOR_LEGEND_BAR_TOP_OFFSET
         )
+        self.legend_label.y = self.bottom + 4
+        for legend_entries in self.legends.values():
+            for entry in legend_entries:
+                entry.pos(left=entry.left)  # Don't move left, but force a recalculation of Y position
 
     def draw(self):
         super().draw()
+        self.legend_label.draw()  # message indicates that bar is the legend
         mouse_over_intervals = detail_section_ref.mouse_over_intervals
         if mouse_over_intervals is not None:
             first_interval = mouse_over_intervals.iloc[0]
             category: IntervalCategory = first_interval['category']
+            for entry in self.legends[category]:
+                entry.draw()
 
 
 class ZoomDateRangeDisplayBar(SimpleRect):

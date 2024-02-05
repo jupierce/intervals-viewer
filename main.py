@@ -483,15 +483,28 @@ class IntervalsTimeline:
             # There is an interval under a recent mouse position --
             # enhance the size of the interval visually. Rows are painted
             # from top to bottom. If we increase size downward, the next row
-            # will paint over it. So increase upward.
+            # will paint over it. So increase size upward.
             start_x, end_x = self.get_interval_extents(self.interval_under_mouse)
+
+            # First, draw a bright white rectangle (just a wide line) that is
+            # slightly offset from the selected interval. A few of these white pixels
+            # will be left around the border of the interval when it renders in.
+            arcade.draw_line(
+                start_x=self.last_set_left + start_x - 2,
+                start_y=self.last_set_bottom + self.timeline_row_height / 2 + 4,
+                end_x=self.last_set_left + end_x,
+                end_y=self.last_set_bottom + self.timeline_row_height / 2 + 4,
+                line_width=self.timeline_row_height + 2,
+                color=arcade.color.WHITE,
+            )
+
             arcade.draw_line(
                 start_x=self.last_set_left + start_x,
                 start_y=self.last_set_bottom + self.timeline_row_height / 2 + 2,
                 end_x=self.last_set_left + end_x,
                 end_y=self.last_set_bottom + self.timeline_row_height / 2 + 2,
                 line_width=self.timeline_row_height + 2,
-                color=make_color_brighter(self.interval_under_mouse['color'])
+                color=self.interval_under_mouse['color']
             )
 
         mouse_x, mouse_y = self.ei.last_known_mouse_location
@@ -871,9 +884,8 @@ class GraphSection(arcade.Section):
         self.zoom_date_range_display_bar.draw()
 
         # If the minimum height of each row is ?px, then figure out how
-        # many we can fit in the graph area. Overshoot by just a bit to make
-        # sure we fill the pixels available if the available height is not a multiple of row_height_px.
-        rows_to_display = self.calc_rows_to_display() + 1
+        # many we can fit in the graph area.
+        rows_to_display = self.calc_rows_to_display()
         available_timelines_ids = list(self.ei.grouped_intervals.groups.keys())
         if self.scroll_y_rows > len(available_timelines_ids) or self.scroll_y_rows == -1:
             self.scroll_y_rows = max(0, len(available_timelines_ids) - 2)

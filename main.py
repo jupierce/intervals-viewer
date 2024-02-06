@@ -77,6 +77,7 @@ class DetailSection(arcade.Section):
         self.ei = ei
 
         font_size = Theme.FONT_SIZE_DETAILS_SECTION
+        self.mouse_from_time_dt: Optional[datetime.datetime] = None  # When the mouse is being dragged, the from time the mouse was pressed
         self.mouse_over_time_dt: Optional[datetime.datetime] = None  # Set when the mouse is over a known datetime.
         self.mouse_over_time_text: arcade.Text = arcade.Text('Wq',
                                                              start_x=2,
@@ -141,6 +142,14 @@ class DetailSection(arcade.Section):
         self.mouse_over_interval_text.draw()
 
     def set_mouse_over_time(self, dt: datetime.datetime, from_dt: Optional[datetime.datetime]):
+        self.mouse_from_time_dt = from_dt
+        self.mouse_over_time_dt = dt
+        self.refresh_mouse_over_time()
+
+    def refresh_mouse_over_time(self):
+        from_dt = self.mouse_from_time_dt
+        dt = self.mouse_over_time_dt
+
         text = f'Mouse[ ({dt})'
         # from_dt is passed in if there is a mouse dragging operation. The click before the
         # drag began is used to calculate a time offset for the initial mouse position.
@@ -157,7 +166,6 @@ class DetailSection(arcade.Section):
             delta = humanize_timedelta(datetime.timedelta(seconds=interval["duration"]))
             text += f'    Interval[ {interval["classification"].display_name} ({interval["from"]})  ->  ({interval["to"]})  Δ:({delta}) ]'
 
-        self.mouse_over_time_dt = dt
         self.mouse_over_time_text.text = text
 
     def set_mouse_over_intervals(self, pd_interval_rows: pd.DataFrame):
@@ -228,6 +236,13 @@ class DetailSection(arcade.Section):
 
         message_section_ref.set_message(IntervalAnalyzer.get_message_attr(interval, 'humanMessage'))
         self.mouse_over_interval_text.text = '\n'.join(lines)
+
+        # The interval that the mouse is over is displayed in the detail section.
+        # Checking whether the mouse is over an interval occurs on a schedule instead of
+        # on every mouse movement. So it is expected for this interval to be out of
+        # sync with what the mouse is actually over. When the interval is set, therefore,
+        # we need to refresh the mouse over date with the trued-up interval.
+        self.refresh_mouse_over_time()
 
 
 # Since different components all want to write different detail/messages,

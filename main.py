@@ -15,6 +15,52 @@ INIT_SCREEN_HEIGHT = 500
 SCREEN_TITLE = "Intervals Analysis"
 
 
+class MessageSection(arcade.Section):
+    """
+    Section for display long strings.
+    """
+
+    def __init__(self, ei: EventsInspector, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.background = SimpleRect(
+            color=Theme.COLOR_MESSAGE_SECTION_BACKGROUND,
+            border_color=arcade.color.LIGHT_GRAY,
+            border_width=1
+        )
+        self.ei = ei
+        self.long_text = arcade.Text(
+            text='',
+            start_x=Layout.MESSAGE_SECTION_LEFT + 2,
+            start_y=0,
+            multiline=True,
+            width=self.window.width - 20,
+            color=Theme.COLOR_MESSAGE_SECTION_FONT_COLOR,
+            font_size=10,
+            font_name=Theme.FONT_NAME
+        )
+        self.on_resize(self.window.width, self.window.height)
+
+    def on_resize(self, window_width: int, window_height: int):
+        self.background.position(
+            left=Layout.MESSAGE_SECTION_LEFT,
+            right=window_width - Layout.MESSAGE_SECTION_RIGHT_OFFSET,
+            bottom=Layout.MESSAGE_SECTION_BOTTOM,
+            top=Layout.MESSAGE_SECTION_BOTTOM + Layout.MESSAGE_SECTION_HEIGHT
+        )
+        self.long_text.width = self.background.width - 5
+        self.long_text.y = self.background.top - 14
+
+    def on_draw(self):
+        self.background.draw()
+        self.long_text.draw()
+
+    def set_message(self, message: Optional[str]):
+        if not message:
+            self.long_text.text = ''
+        else:
+            self.long_text.text = message
+
+
 class DetailSection(arcade.Section):
     """
     Section at the bottom of the layout which reports details about
@@ -23,7 +69,11 @@ class DetailSection(arcade.Section):
 
     def __init__(self, ei: EventsInspector, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.background = SimpleRect(color=arcade.color.AERO_BLUE)
+        self.background = SimpleRect(
+            color=Theme.COLOR_DETAIL_SECTION_BACKGROUND,
+            border_color=arcade.color.LIGHT_GRAY,
+            border_width=1,
+        )
         self.ei = ei
 
         font_size = Theme.FONT_SIZE_DETAILS_SECTION
@@ -33,7 +83,8 @@ class DetailSection(arcade.Section):
                                                              start_y=Layout.DETAIL_SECTION_HEIGHT - font_size - 2,
                                                              font_name=Theme.FONT_NAME,
                                                              font_size=font_size,
-                                                             color=arcade.color.BLACK,
+                                                             color=Theme.COLOR_DETAIL_SECTION_FONT_COLOR,
+                                                             bold=True,
                                                              )
 
         # When the mouse is over a specific timeline, shows information pertinent to all intervals in that timeline (locator information)
@@ -45,7 +96,7 @@ class DetailSection(arcade.Section):
                                                                  width=2000,  # multiline requires width. Set to large width to avoid wrapping.
                                                                  font_name=Theme.FONT_NAME,
                                                                  font_size=font_size,
-                                                                 color=arcade.color.BLACK
+                                                                 color=Theme.COLOR_DETAIL_SECTION_FONT_COLOR
                                                                  )
 
         # When the mouse is over a specific interval, shows information pertinent to that interval
@@ -57,7 +108,7 @@ class DetailSection(arcade.Section):
                                                                  width=2000,  # multiline requires width. Set to large width to avoid wrapping.
                                                                  font_name=Theme.FONT_NAME,
                                                                  font_size=font_size,
-                                                                 color=arcade.color.BLACK
+                                                                 color=Theme.COLOR_DETAIL_SECTION_FONT_COLOR
                                                                  )
 
         # We set 'Wq' to measure the content height. Clear it before we start rendering.
@@ -71,8 +122,6 @@ class DetailSection(arcade.Section):
         self.background.position(left=Layout.DETAIL_SECTION_LEFT, width=window_width,
                                  bottom=Layout.DETAIL_SECTION_BOTTOM, height=Layout.DETAIL_SECTION_HEIGHT)
 
-        box = self.background
-
     def on_draw(self):
         self.background.draw()
         self.mouse_over_time_text.draw()
@@ -81,9 +130,10 @@ class DetailSection(arcade.Section):
         # The mouse_over_timeline_text may have many characters which go beyond the
         # intended area and into the area of text meant for interval information.
         # This rectangle will erase the overage before drawing the interval information.
+        left = Layout.DETAIL_SECTION_LEFT + self.mouse_over_interval_text.x
         arcade.draw_lrtb_rectangle_filled(
-            left=Layout.DETAIL_SECTION_LEFT + self.mouse_over_interval_text.x,
-            right=max(Layout.DETAIL_SECTION_LEFT + self.mouse_over_interval_text.x, self.window.width - Layout.DETAIL_SECTION_RIGHT_OFFSET),
+            left=left,
+            right=max(left, self.window.width - Layout.DETAIL_SECTION_RIGHT_OFFSET - self.background.border_width),
             top=Layout.DETAIL_SECTION_HEIGHT - self.mouse_over_time_text.content_height,
             bottom=Layout.DETAIL_SECTION_BOTTOM,
             color=self.background.color,
@@ -152,6 +202,7 @@ class DetailSection(arcade.Section):
         if interval is None:
             # The interval is being cleared. Clear the text in the detail section.
             self.mouse_over_interval_text.text = ''
+            message_section_ref.set_message('')
             return
 
         lines: List[str] = list()
@@ -175,12 +226,14 @@ class DetailSection(arcade.Section):
         for common_annotation_keys in IntervalAnalyzer.get_message_annotation_names(interval):
             add_annotation_line(common_annotation_keys.capitalize(), common_annotation_keys)
 
+        message_section_ref.set_message(IntervalAnalyzer.get_message_attr(interval, 'humanMessage'))
         self.mouse_over_interval_text.text = '\n'.join(lines)
 
 
-# Since different components all want to write different detail,
+# Since different components all want to write different detail/messages,
 # store a global reference once we initialize.
 detail_section_ref: Optional[DetailSection] = None
+message_section_ref: Optional[MessageSection] = None
 
 
 class ColorLegendEntry(SimpleRect):
@@ -1087,16 +1140,19 @@ class GraphSection(arcade.Section):
 class GraphInterfaceView(arcade.View):
 
     def __init__(self, ei: EventsInspector, window: arcade.Window):
-        global detail_section_ref
+        global detail_section_ref, message_section_ref
         super().__init__(window)
         self.ei = ei
         # All sections must have prevent_dispatch_view={False} so that the View gets on_mouse_motion
         self.detail_section = DetailSection(ei, 0, 0, 0, 0, prevent_dispatch_view={False})
         detail_section_ref = self.detail_section
+        self.message_section = MessageSection(ei, 0, 0, 0, 0, prevent_dispatch_view={False})
+        message_section_ref = self.message_section
         self.graph_section = GraphSection(ei, 0, 0, 0, 0, prevent_dispatch_view={False})
         self.adjust_section_positions(self.window.width, self.window.height)
         self.add_section(self.graph_section)
         self.add_section(self.detail_section)
+        self.add_section(self.message_section)
 
     def adjust_section_positions(self, window_width, window_height):
         self.graph_section.width = window_width
@@ -1110,19 +1166,13 @@ class GraphInterfaceView(arcade.View):
         print(f"View resized to: {window_width}, {window_height}")
         self.ei.on_zoom_resize(window_width - Layout.ZOOM_SCROLL_BAR_WIDTH - Layout.CATEGORY_BAR_WIDTH)
         self.adjust_section_positions(window_width, window_height)
+        self.message_section.on_resize(window_width, window_height)
 
     def on_show_view(self):
         pass
 
     def on_mouse_motion(self, x: int, y: int, dx: int, dy: int):
         self.ei.last_known_mouse_location = (x, y)
-
-
-    # def on_draw(self):
-    #     arcade.set_background_color(arcade.color.DARK_BLUE_GRAY)
-    #     self.clear()
-
-
 
 
 class MainWindow(arcade.Window):

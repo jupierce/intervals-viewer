@@ -6,7 +6,7 @@ import arcade
 
 class SimpleRect:
 
-    def __init__(self, color: arcade.Color):
+    def __init__(self, color: arcade.Color, border_color: Optional[arcade.Color] = None, border_width: int = 0):
         self._left = 0
         self._right = 0
         self._top = 0
@@ -14,6 +14,8 @@ class SimpleRect:
         self._width = 0
         self._height = 0
         self.color = color
+        self.border_color = border_color
+        self.border_width = border_width
 
     def position(self,
                  left: Optional[int] = None,
@@ -83,7 +85,14 @@ class SimpleRect:
         return x >= self.left and x < self.right and y >= self.bottom and y < self.top
 
     def draw(self):
-        arcade.draw_lrtb_rectangle_filled(self.left, self.right, self.top, self.bottom, color=self.color)
+        if self.border_color:
+            arcade.draw_lrtb_rectangle_filled(self.left, self.right, self.top, self.bottom, color=self.border_color)
+        arcade.draw_lrtb_rectangle_filled(
+            self.left + self.border_width,
+            self.right - self.border_width,
+            self.top - self.border_width,
+            self.bottom + self.border_width,
+            color=self.color)
 
 
 def humanize_timedelta(td: datetime.timedelta) -> str:

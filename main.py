@@ -1213,6 +1213,8 @@ class FilteringField:
             autoname = display_name.lower()
             if autoname in ('category', 'classification'):
                 self.column_name = f'{autoname}_str'
+            elif autoname == 'message':
+                self.column_name = f'{IntervalAnalyzer.STRUCTURED_MESSAGE_PREFIX}humanMessage'
             else:
                 # assume autoname is a locator key
                 self.column_name = f'{IntervalAnalyzer.STRUCTURED_LOCATOR_KEY_PREFIX}{autoname}'
@@ -1276,7 +1278,7 @@ class FilteringView(arcade.View):
         reset_button.on_click = self.on_reset_click
         self.v_box.add(reset_button)
 
-        for filtering_field_name in ('Category', 'Classification', 'Namespace', 'Pod', 'UID',):
+        for filtering_field_name in ('Category', 'Classification', 'Namespace', 'Pod', 'UID', 'Message'):
             filter_field_hbox = gui.UIBoxLayout(vertical=False)
             field_label = arcade.gui.UILabel(
                 text=filtering_field_name,

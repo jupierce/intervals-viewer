@@ -60,7 +60,7 @@ class MessageSection(arcade.Section):
     def set_message(self, message: Optional[str]):
         if not message:
             self.long_text.text = '''
-[R]=Reset Zoom  [+/-]=Timeline Height  
+[R]=Reset Zoom  [+/-]=Timeline Height  [F1] Filtering
 [Home/End]=Scroll Top/Bottom  [PgUp/PgDown/\u2191/\u2193]=Scroll            
 '''.strip()  # Strip initial linefeed
         else:
@@ -1257,8 +1257,6 @@ class FilteringView(arcade.View):
         self.graph_view = graph_view
         self.filtering_fields: Set[FilteringField] = set()
 
-        arcade.set_background_color(arcade.color.BEIGE)
-
         self.v_box = gui.UIBoxLayout()
 
         # Create a text label
@@ -1291,12 +1289,14 @@ class FilteringView(arcade.View):
 
             # Create a text input field
             field_filter_pattern = gui.UIInputText(
-                color=arcade.color.DARK_BLUE_GRAY,
+                text_color=arcade.color.BLACK,
                 font_size=15,
                 width=800,
-                text=" "
+                text=" ",
             )
-            filter_field_hbox.add(field_filter_pattern)
+            field_filter_pattern.caret.visible = False
+            black_texture = arcade.make_soft_square_texture(size=1000, color=(240, 240, 240), outer_alpha=255)
+            filter_field_hbox.add(field_filter_pattern.with_background(black_texture).with_border(color=arcade.color.DARK_GRAY).with_space_around(top=20))
             filtering_field = FilteringField(display_name=filtering_field_name, input_box=field_filter_pattern)
             self.filtering_fields.add(filtering_field)
             self.v_box.add(filter_field_hbox)
@@ -1317,7 +1317,7 @@ class FilteringView(arcade.View):
         cancel_button.on_click = self.on_cancel_click
         buttons_hbox.add(cancel_button)
 
-        self.v_box.add(buttons_hbox)
+        self.v_box.add(buttons_hbox.with_space_around(top=20))
 
         examples = arcade.gui.UITextArea(
             text='''
@@ -1334,7 +1334,7 @@ Complex Expression (do not mix with Simple):
 '''.strip(),
             text_color=arcade.color.DARK_RED,
             width=1000,
-            height=500,
+            height=300,
             font_size=12,
             font_name=Theme.FONT_NAME,
             multiline=True
@@ -1342,11 +1342,10 @@ Complex Expression (do not mix with Simple):
 
         self.v_box.add(examples.with_space_around(top=30))
 
-
         self.manager.add(
             arcade.gui.UIAnchorWidget(
                 anchor_x="center_x",
-                anchor_y="center_y",
+                anchor_y="top",
                 child=self.v_box)
         )
 

@@ -924,7 +924,14 @@ class GraphSection(arcade.Section):
         return self.category_bar.height // self.row_height_px
 
     def on_draw(self):
-        arcade.set_background_color(arcade.color.BLUE)
+        arcade.draw_lrtb_rectangle_filled(  # Clear the section
+            left=self.left,
+            right=self.right,
+            top=self.top,
+            bottom=self.bottom,
+            color=arcade.color.BLACK
+        )
+
         self.color_legend_bar.draw()
         self.zoom_date_range_display_bar.draw()
 

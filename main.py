@@ -4,6 +4,7 @@ from functools import lru_cache
 import pandas as pd
 import json
 import arcade
+import arcade.gui as gui
 
 from typing import Optional, List, Tuple, Dict
 
@@ -846,7 +847,6 @@ class GraphSection(arcade.Section):
             timeline_row_height=timeline_row_height,
             timeline_row_width=timeline_row_width
         )
-        print(f'loaded: {group_id}')
         return interval_timeline
 
     @property
@@ -1181,27 +1181,128 @@ class GraphInterfaceView(arcade.View):
 
         self.detail_section.width = window_width
 
-    def on_resize(self, window_width: float, window_height: float):
+    def on_resize(self, window_width: int, window_height: int):
         print(f"View resized to: {window_width}, {window_height}")
         self.ei.on_zoom_resize(window_width - Layout.ZOOM_SCROLL_BAR_WIDTH - Layout.CATEGORY_BAR_WIDTH)
         self.adjust_section_positions(window_width, window_height)
         self.message_section.on_resize(window_width, window_height)
+        self.graph_section.on_resize(window_width, window_height)
+        self.detail_section.on_resize(window_width, window_height)
 
     def on_show_view(self):
-        pass
+        self.on_resize(self.window.width, self.window.height)
 
     def on_mouse_motion(self, x: int, y: int, dx: int, dy: int):
         self.ei.last_known_mouse_location = (x, y)
+
+    def on_key_press(self, symbol: int, modifiers: int):
+        self.window.on_key_press(symbol, modifiers)  # Pass key to window in case there are view changes desired
+
+
+class FilteringView(arcade.View):
+
+    def __init__(self, ei: EventsInspector, window: arcade.Window, ui_manager: gui.UIManager, graph_view: GraphInterfaceView):
+        super().__init__(window)
+        self.ei = ei
+        self.manager = ui_manager
+        self.graph_view = graph_view
+
+        arcade.set_background_color(arcade.color.BEIGE)
+
+        self.v_box = gui.UIBoxLayout()
+
+        # Create a text label
+        self.filtering_label = arcade.gui.UILabel(
+            text="Filtering Rules",
+            text_color=arcade.color.DARK_RED,
+            height=40,
+            font_size=20,
+            font_name=Theme.FONT_NAME)
+
+        self.v_box.add(self.filtering_label.with_space_around(bottom=10))
+
+        for filtering_field in ('Category', 'Classification', 'Namespace', 'Pod', 'UID',):
+            filter_field_hbox = gui.UIBoxLayout(vertical=False)
+            field_label = arcade.gui.UILabel(
+                text=filtering_field,
+                text_color=arcade.color.BLACK,
+                width=200,
+                height=40,
+                font_size=15,
+                font_name=Theme.FONT_NAME)
+            filter_field_hbox.add(field_label)
+
+            # Create a text input field
+            field_filter_pattern = gui.UIInputText(
+                color=arcade.color.DARK_BLUE_GRAY,
+                font_size=15,
+                width=800,
+                text="@.contains('.*')"
+            )
+            filter_field_hbox.add(field_filter_pattern)
+
+            self.v_box.add(filter_field_hbox)
+
+        buttons_hbox = gui.UIBoxLayout(vertical=False, space_between=20)
+        # Create a button
+        submit_button = gui.UIFlatButton(
+            color=arcade.color.DARK_BLUE_GRAY,
+            text='Apply'
+        )
+        submit_button.on_click = self.on_submit_click
+        buttons_hbox.add(submit_button)
+
+        cancel_buttom = gui.UIFlatButton(
+            color=arcade.color.DARK_BLUE_GRAY,
+            text='Cancel',
+        )
+        cancel_buttom.on_click = self.on_cancel_click
+        buttons_hbox.add(cancel_buttom)
+
+        self.v_box.add(buttons_hbox)
+
+        self.manager.add(
+            arcade.gui.UIAnchorWidget(
+                anchor_x="center_x",
+                anchor_y="center_y",
+                child=self.v_box)
+        )
+
+    def on_resize(self, window_width: float, window_height: float):
+        super().on_resize(window_width, window_height)
+
+    def on_submit_click(self, event):
+        self.window.show_view(self.graph_view)
+
+    def on_cancel_click(self, event):
+        self.window.show_view(self.graph_view)
+
+    def on_draw(self):
+        self.clear()
+        self.manager.draw()
+
+    def on_show_view(self):
+        self.manager.enable()
+        self.on_resize(self.window.width, self.window.height)
+        arcade.set_background_color(arcade.color.DARK_BLUE_GRAY)
+
+    def on_hide_view(self):
+        self.manager.disable()
+
+    def on_key_press(self, symbol: int, modifiers: int):
+        self.window.on_key_press(symbol, modifiers)  # Pass key to window in case there are view changes desired
 
 
 class MainWindow(arcade.Window):
 
     def __init__(self, ei: EventsInspector, width, height, title):
         super().__init__(width, height, title, resizable=True)
+        self.ui_manager = gui.UIManager()
         arcade.set_background_color(arcade.color.WHITE)
         self.ei = ei
-        self.view_graph = GraphInterfaceView(ei, self)
-        self.show_view(self.view_graph)
+        self.graph_view = GraphInterfaceView(ei, self)
+        self.filter_view = FilteringView(ei, self, self.ui_manager, self.graph_view)
+        self.show_view(self.graph_view)
 
     def on_resize(self, width, height):
         """ This method is automatically called when the window is resized. """
@@ -1209,13 +1310,16 @@ class MainWindow(arcade.Window):
         # Call the parent. Failing to do this will mess up the coordinates,
         # and default to 0,0 at the center and the edges being -1 to 1.
         super().on_resize(width, height)
-        self.view_graph.on_resize(width, height)
+        self.graph_view.on_resize(width, height)
+        self.filter_view.on_resize(width, height)
         print(f"Window resized to: {width}, {height}")
 
+    def on_key_press(self, symbol: int, modifiers: int):
+        if symbol == arcade.key.F1 or symbol == arcade.key.SLASH:
+            self.show_view(self.filter_view)
 
-    # def on_draw(self):
-    #     """ Render the screen. """
-    #     self.clear()
+        if self.current_view == self.filter_view and symbol == arcade.key.ESCAPE:
+            self.show_view(self.graph_view)
 
 
 # Press the green button in the gutter to run the script.

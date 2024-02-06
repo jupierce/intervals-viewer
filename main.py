@@ -39,6 +39,7 @@ class MessageSection(arcade.Section):
             font_name=Theme.FONT_NAME
         )
         self.on_resize(self.window.width, self.window.height)
+        self.set_message('')  # Trigger help message content
 
     def on_resize(self, window_width: int, window_height: int):
         self.background.position(
@@ -56,7 +57,10 @@ class MessageSection(arcade.Section):
 
     def set_message(self, message: Optional[str]):
         if not message:
-            self.long_text.text = ''
+            self.long_text.text = '''
+[R]=Reset Zoom  [+/-]=Timeline Height  
+[Home/End]=Scroll Top/Bottom  [PgUp/PgDown/\u2191/\u2193]=Scroll            
+'''.strip()  # Strip initial linefeed
         else:
             self.long_text.text = message
 
@@ -957,11 +961,11 @@ class GraphSection(arcade.Section):
                 # Cancel any active drag
                 self.mouse_button_active_drag = dict()
 
-        if arcade.key.NUM_ADD in self.keys_down:
+        if arcade.key.NUM_ADD in self.keys_down or arcade.key.EQUAL in self.keys_down:  # non-numpad "+" is shift+= ; ignore if shift is not being held down
             self.row_height_px = min(self.row_height_px + 2, 25)
             self.resize_scroll_bar()
 
-        if arcade.key.NUM_SUBTRACT in self.keys_down:
+        if arcade.key.NUM_SUBTRACT in self.keys_down or arcade.key.MINUS in self.keys_down:
             self.row_height_px = max(self.row_height_px - 2, 2)
             self.resize_scroll_bar()
 
@@ -975,8 +979,8 @@ class GraphSection(arcade.Section):
         self.process_keys_down(delay_until_next=0.5)  # Wait 0.5 seconds before starting to recognize key being held down
 
     def on_key_release(self, key, modifiers):
-        self.keys_down.remove(key)
-        pass
+        if key in self.keys_down:
+            self.keys_down.remove(key)
 
     def on_resize(self, width: int, height: int):
         self.color_legend_bar.on_resize()

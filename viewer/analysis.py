@@ -1,17 +1,18 @@
 import arcade
 import pandas
 import pandas as pd
+import traceback
 from pandas.core.groupby import DataFrameGroupBy
 from datetime import datetime, timedelta
 from typing import Optional, Tuple, Union, List
-from .intervals import IntervalClassification, IntervalClassifications
+from .intervals import IntervalClassification, IntervalClassifications, IntervalCategory
 
 NANOSECONDS_PER_SECOND = 1000000000
 
 
-def get_interval_category(row: pd.Series):
+def get_interval_category(row: pd.Series) -> pd.Series:
     classification: IntervalClassification = row['classification']
-    return classification.category.value
+    return pd.Series([classification.category.value, classification.category.value.lower()])
 
 
 def seconds_between(pd_datetime_from, pd_datatime_to) -> float:
@@ -26,12 +27,12 @@ def get_interval_duration(row: pd.Series):
     return seconds_between(row['from'], row['to'])
 
 
-def get_interval_classification(interval: pd.Series) -> IntervalClassifications:
+def get_interval_classification(interval: pd.Series) -> pd.Series:
     classifications: List[IntervalClassification] = [e.value for e in IntervalClassifications]
     for classification in classifications:
         if classification.matches(interval):
-            return classification
-    return IntervalClassifications.UnknownClassification
+            return pd.Series([classification, classification.display_name.lower()])
+    return pd.Series([IntervalClassifications.UnknownClassification, IntervalClassifications.UnknownClassification.display_name.lower()])
 
 
 def get_interval_color(row: pd.Series) -> Union[arcade.Color, Tuple[int, int, int, int]]:
@@ -64,11 +65,11 @@ class EventsInspector:
         # self.events_df = self.events_df[-(self.events_df['tempStructuredMessage.annotations.interesting'] == 'false')]  # Notice the '-', which inverts the criteria
 
         # Classify an interval. The classification implies category and color for later decoration of the interval row.
-        self.events_df['classification'] = self.events_df.apply(get_interval_classification, axis=1)
+        self.events_df[['classification', 'classification_str']] = self.events_df.apply(get_interval_classification, axis=1)
 
         # Create a new row called category that will be used as the first grouping level for the
         # data. In the graph area, category for each timeline is shown on the left.
-        self.events_df['category'] = self.events_df.apply(get_interval_category, axis=1)
+        self.events_df[['category', 'category_str']] = self.events_df.apply(get_interval_category, axis=1)
         # Populate the color the interval should be rendered with.
         self.events_df['color'] = self.events_df.apply(get_interval_color, axis=1)
 
@@ -110,6 +111,17 @@ class EventsInspector:
         df = self.selected_rows
         filtered_df = df[(df['to'] >= self.zoom_timeline_start) & (df['from'] <= self.zoom_timeline_stop)]
         self.grouped_intervals = filtered_df.groupby(['category', 'locator'])
+
+    def set_query(self, query: Optional[str] = None):
+        if query:
+            try:
+                self.selected_rows = self.events_df.query(query)
+            except:
+                traceback.print_exc()
+                raise
+        else:
+            self.selected_rows = self.events_df
+        self.notify_of_timeline_date_range_change()
 
     def on_zoom_resize(self, timeline_width):
         self.current_timeline_width = timeline_width

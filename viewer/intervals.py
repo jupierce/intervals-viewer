@@ -115,7 +115,7 @@ class IntervalClassification:
                  series_matcher: Optional[Callable[[pd.Series], bool]] = None,
                  simple_series_matcher: Optional[SimpleIntervalMatcher] = None):
         self.display_name = display_name
-        self.category = category
+        self.category: IntervalCategory = category
         self.color = color
         self.does_series_match = series_matcher
         self.simple_series_matcher = simple_series_matcher

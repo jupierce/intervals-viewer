@@ -5,8 +5,9 @@ import pandas as pd
 import json
 import arcade
 import arcade.gui as gui
+import re
 
-from typing import Optional, List, Tuple, Dict
+from typing import Optional, List, Tuple, Dict, Set
 
 from viewer import SimpleRect, EventsInspector, Layout, humanize_timedelta, Theme, make_color_brighter
 from viewer.intervals import IntervalAnalyzer, IntervalCategory, IntervalClassification, IntervalClassifications
@@ -1199,6 +1200,52 @@ class GraphInterfaceView(arcade.View):
         self.window.on_key_press(symbol, modifiers)  # Pass key to window in case there are view changes desired
 
 
+class FilteringField:
+
+    SIMPLE_SEARCH_REGEX = re.compile(r'^[^=\'".]*$')  # If a user pattern does not contain =, ', ", or ., parse it as a simplified query expression
+
+    def __init__(self, display_name: str, input_box: gui.UIInputText, column_name: Optional[str] = None):
+        self.display_name = display_name
+        self.column_name = column_name
+        self.input_box = input_box
+
+        if column_name is None:
+            autoname = display_name.lower()
+            if autoname in ('category', 'classification'):
+                self.column_name = f'{autoname}_str'
+            else:
+                # assume autoname is a locator key
+                self.column_name = f'{IntervalAnalyzer.STRUCTURED_LOCATOR_KEY_PREFIX}{autoname}'
+
+    def get_query_string(self) -> Optional[str]:
+        query = self.input_box.text.strip().lower()
+        if not query:
+            return None
+
+        if FilteringField.SIMPLE_SEARCH_REGEX.match(query):
+            substrings = re.split(r'([&|\s()])', query)  # split using &, |, (, ), or space, and return a list containing delimiters
+            query = ''
+            for substring in substrings:
+                substring = substring.strip()
+                if not substring:
+                    continue
+                if query:
+                    query += ' '
+                if substring in ('&', '|', 'not', ')', '('):
+                    query += substring
+                else:
+                    query += f"@.contains('{substring}')"
+
+        if 'isnull(' not in query and 'contains(' in query:
+            # @.contains cannot run against null. Help the user out.
+            query = f'(not @.isnull()) & ({query})'
+
+        query = query.replace('contains(', 'str.lower().str.contains(')
+        query = query.replace('@', f'`{self.column_name}`')
+
+        return query
+
+
 class FilteringView(arcade.View):
 
     def __init__(self, ei: EventsInspector, window: arcade.Window, ui_manager: gui.UIManager, graph_view: GraphInterfaceView):
@@ -1206,6 +1253,7 @@ class FilteringView(arcade.View):
         self.ei = ei
         self.manager = ui_manager
         self.graph_view = graph_view
+        self.filtering_fields: Set[FilteringField] = set()
 
         arcade.set_background_color(arcade.color.BEIGE)
 
@@ -1221,10 +1269,17 @@ class FilteringView(arcade.View):
 
         self.v_box.add(self.filtering_label.with_space_around(bottom=10))
 
-        for filtering_field in ('Category', 'Classification', 'Namespace', 'Pod', 'UID',):
+        reset_button = gui.UIFlatButton(
+            color=arcade.color.DARK_BLUE_GRAY,
+            text='Reset',
+        )
+        reset_button.on_click = self.on_reset_click
+        self.v_box.add(reset_button)
+
+        for filtering_field_name in ('Category', 'Classification', 'Namespace', 'Pod', 'UID',):
             filter_field_hbox = gui.UIBoxLayout(vertical=False)
             field_label = arcade.gui.UILabel(
-                text=filtering_field,
+                text=filtering_field_name,
                 text_color=arcade.color.BLACK,
                 width=200,
                 height=40,
@@ -1237,29 +1292,54 @@ class FilteringView(arcade.View):
                 color=arcade.color.DARK_BLUE_GRAY,
                 font_size=15,
                 width=800,
-                text="@.contains('.*')"
+                text=" "
             )
             filter_field_hbox.add(field_filter_pattern)
-
+            filtering_field = FilteringField(display_name=filtering_field_name, input_box=field_filter_pattern)
+            self.filtering_fields.add(filtering_field)
             self.v_box.add(filter_field_hbox)
 
         buttons_hbox = gui.UIBoxLayout(vertical=False, space_between=20)
         # Create a button
-        submit_button = gui.UIFlatButton(
+        apply_button = gui.UIFlatButton(
             color=arcade.color.DARK_BLUE_GRAY,
             text='Apply'
         )
-        submit_button.on_click = self.on_submit_click
-        buttons_hbox.add(submit_button)
+        apply_button.on_click = self.on_apply_click
+        buttons_hbox.add(apply_button)
 
-        cancel_buttom = gui.UIFlatButton(
+        cancel_button = gui.UIFlatButton(
             color=arcade.color.DARK_BLUE_GRAY,
             text='Cancel',
         )
-        cancel_buttom.on_click = self.on_cancel_click
-        buttons_hbox.add(cancel_buttom)
+        cancel_button.on_click = self.on_cancel_click
+        buttons_hbox.add(cancel_button)
 
         self.v_box.add(buttons_hbox)
+
+        examples = arcade.gui.UITextArea(
+            text='''
+Simple Expression Examples:
+    (disruption | alert)            => Contains substring "disruption" or "alert"
+    not(disruption | alert)         => Must not contain substring "disruption" or "alert"
+    host & pod                      => Must contain substring "host" and "pod"
+
+Complex Expression (do not mix with Simple):
+    @.contains('.*pod.+tree')       => Must contain regex
+    @.isnull() | @ == 'api'         => Value is null or exactly matches "api"  
+
+        
+'''.strip(),
+            text_color=arcade.color.DARK_RED,
+            width=1000,
+            height=500,
+            font_size=12,
+            font_name=Theme.FONT_NAME,
+            multiline=True
+        )
+
+        self.v_box.add(examples.with_space_around(top=30))
+
 
         self.manager.add(
             arcade.gui.UIAnchorWidget(
@@ -1268,11 +1348,29 @@ class FilteringView(arcade.View):
                 child=self.v_box)
         )
 
-    def on_resize(self, window_width: float, window_height: float):
+    def on_resize(self, window_width: int, window_height: int):
         super().on_resize(window_width, window_height)
 
-    def on_submit_click(self, event):
-        self.window.show_view(self.graph_view)
+    def on_apply_click(self, event):
+        full_query_string = ''
+        for filtering_field in self.filtering_fields:
+            addition = filtering_field.get_query_string()
+            if addition:
+                addition = f'({addition})'
+                if full_query_string:
+                    full_query_string += ' & '
+                full_query_string += addition
+        print(f'Updating query: {full_query_string}')
+        try:
+            self.ei.set_query(full_query_string)
+            self.window.show_view(self.graph_view)
+        except:
+            # Syntax issue in query
+            pass
+
+    def on_reset_click(self, event):
+        for filtering_field in self.filtering_fields:
+            filtering_field.input_box.text = ' '
 
     def on_cancel_click(self, event):
         self.window.show_view(self.graph_view)

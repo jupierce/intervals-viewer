@@ -965,7 +965,7 @@ class GraphSection(arcade.Section):
                 self.mouse_button_active_drag = dict()
 
         if arcade.key.NUM_ADD in self.keys_down or arcade.key.EQUAL in self.keys_down:  # non-numpad "+" is shift+= ; ignore if shift is not being held down
-            self.row_height_px = min(self.row_height_px + 2, 25)
+            self.row_height_px = min(self.row_height_px + 2, self.height // 4)
             self.resize_scroll_bar()
 
         if arcade.key.NUM_SUBTRACT in self.keys_down or arcade.key.MINUS in self.keys_down:

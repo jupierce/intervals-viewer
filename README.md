@@ -1,11 +1,15 @@
 # Intervals Viewer
 
 ## Installation
+Requires Python3.6 or later.
 
 ## System Dependencies
-- On Linux, install `xclip` through dnf or your distribution's package manager.
-- Requires Python3.6 or later.
-
+Fedora/RHEL quick paste: `sudo dnf install xclip libjpeg-devel zlib-devel`
+ 
+On Linux, install the following through dnf or your distribution's package manager.
+  - `xlcip` - Required for clipboard support.
+  - [Python Pillow Dependencies](https://pillow.readthedocs.io/en/latest/installation.html)
+  
 ## Installation
 ```bash
 $ git clone https://github.com/jupierce/intervals-viewer.git

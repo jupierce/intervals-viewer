@@ -1,2 +1,4 @@
 arcade == 2.6.17
 pandas == 2.2.0
+requests
+pyperclip  # Requires xclip installation on linux or pygtk on windows

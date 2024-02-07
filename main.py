@@ -7,7 +7,7 @@ import arcade
 import arcade.gui as gui
 import re
 
-from typing import Optional, List, Tuple, Dict, Set
+from typing import Optional, List, Tuple, Dict, Set, Iterable
 
 from viewer import SimpleRect, EventsInspector, Layout, humanize_timedelta, Theme, make_color_brighter
 from viewer.intervals import IntervalAnalyzer, IntervalCategory, IntervalClassification, IntervalClassifications
@@ -1183,7 +1183,6 @@ class GraphInterfaceView(arcade.View):
         self.detail_section.width = window_width
 
     def on_resize(self, window_width: int, window_height: int):
-        print(f"View resized to: {window_width}, {window_height}")
         self.ei.on_zoom_resize(window_width - Layout.ZOOM_SCROLL_BAR_WIDTH - Layout.CATEGORY_BAR_WIDTH)
         self.adjust_section_positions(window_width, window_height)
         self.message_section.on_resize(window_width, window_height)
@@ -1204,10 +1203,10 @@ class FilteringField:
 
     SIMPLE_SEARCH_REGEX = re.compile(r'^[^=\'".]*$')  # If a user pattern does not contain =, ', ", or ., parse it as a simplified query expression
 
-    def __init__(self, display_name: str, input_box: gui.UIInputText, column_name: Optional[str] = None):
+    def __init__(self, display_name: str, column_name: Optional[str] = None, filter_expression: str = ' '):
         self.display_name = display_name
         self.column_name = column_name
-        self.input_box = input_box
+        self.filter_expression = filter_expression
 
         if column_name is None:
             autoname = display_name.lower()
@@ -1219,33 +1218,171 @@ class FilteringField:
                 # assume autoname is a locator key
                 self.column_name = f'{IntervalAnalyzer.STRUCTURED_LOCATOR_KEY_PREFIX}{autoname}'
 
-    def get_query_string(self) -> Optional[str]:
-        query = self.input_box.text.strip().lower()
-        if not query:
+    def get_field_text(self) -> str:
+        return self.filter_expression
+
+    def get_expression_component(self) -> Optional[str]:
+        expression = self.filter_expression.lower().strip()
+        if not expression:
             return None
 
-        if FilteringField.SIMPLE_SEARCH_REGEX.match(query):
-            substrings = re.split(r'([&|\s()])', query)  # split using &, |, (, ), or space, and return a list containing delimiters
-            query = ''
+        if FilteringField.SIMPLE_SEARCH_REGEX.match(expression):
+            substrings = re.split(r'([&|\s()])', expression)  # split using &, |, (, ), or space, and return a list containing delimiters
+            expression = ''
             for substring in substrings:
                 substring = substring.strip()
                 if not substring:
                     continue
-                if query:
-                    query += ' '
+                if expression:
+                    expression += ' '
                 if substring in ('&', '|', 'not', ')', '('):
-                    query += substring
+                    expression += substring
                 else:
-                    query += f"@.contains('{substring}')"
+                    expression += f"@.contains('{substring}')"
 
-        if 'isnull(' not in query and 'contains(' in query:
+        if 'isnull(' not in expression and 'contains(' in expression:
             # @.contains cannot run against null. Help the user out.
-            query = f'(not @.isnull()) & ({query})'
+            expression = f'(not @.isnull()) & ({expression})'
 
-        query = query.replace('contains(', 'str.lower().str.contains(')
-        query = query.replace('@', f'`{self.column_name}`')
+        expression = expression.replace('contains(', 'str.lower().str.contains(')
+        expression = expression.replace('@', f'`{self.column_name}`')
+        return expression
 
-        return query
+    def is_field_set(self):
+        return len(self.filter_expression.strip()) > 0
+
+    def set_field_text(self, text: str):
+        self.filter_expression = text
+
+
+class FilteringFields:
+    """
+    Represents a collection of FilteringField objects tied to a set of
+    field names (e.g. category, classification, ...).
+    """
+
+    def __init__(self, filtering_field_names: Iterable[str]):
+        self.fields: OrderedDict[str, FilteringField] = OrderedDict()
+        for field_name in filtering_field_names:
+            self.fields[field_name] = FilteringField(field_name)
+
+    def get_field_by_name(self, field_name: str) -> FilteringField:
+        return self.fields[field_name]
+
+    def get_expression_component(self) -> Optional[str]:
+        if not self.any_field_set():
+            return None
+
+        expression = ''
+        for filtering_field in self.fields.values():
+            addition = filtering_field.get_expression_component()
+            if addition:
+                addition = f'({addition})'
+                if expression:
+                    expression += ' & '
+                expression += addition
+
+        return expression
+
+    def reset(self):
+        for field in self.fields.values():
+            field.set_field_text(' ')
+
+    def any_field_set(self) -> bool:
+        for field in self.fields.values():
+            if field.is_field_set():
+                return True
+        return False
+
+
+class OrOfFilteringFields:
+    """
+    Represents and OR'd collection of FilteringFields.
+    """
+
+    def __init__(self, previous_button: arcade.gui.UIFlatButton, next_button: arcade.gui.UIFlatButton):
+        self.previous_button = previous_button
+        self.next_button = next_button
+        self.filtering_field_inputs: OrderedDict[str, arcade.gui.UIInputText] = OrderedDict()
+        self.field_sets: List[FilteringFields] = list()
+        self.focus_offset = 0
+
+        self.previous_button.on_click = lambda event: self.set_focus(self.focus_offset - 1)
+        self.next_button.on_click = lambda event: self.set_focus(self.focus_offset + 1)
+
+    def add_new_field_to_track(self, display_name, ui_text_input: arcade.gui.UIInputText):
+        if len(self.field_sets) > 0:
+            raise IOError('All fields must be added before setting focus')
+        self.filtering_field_inputs[display_name] = ui_text_input
+
+    def get_field_set_count(self):
+        return len(self.field_sets)
+
+    def set_focus(self, offset):
+        if offset < 0:
+            offset = 0
+
+        while offset >= self.get_field_set_count():
+            self._add_field_set()
+
+        self.persist_focused_values()  # Store existing values before we navigate to new one
+        self.focus_offset = offset
+        self.refresh_focus()
+
+    def persist_focused_values(self):
+        field_set = self.field_sets[self.focus_offset]  # Store the old text values in the FilteringField objects
+        for field_name, input_field in self.filtering_field_inputs.items():
+            field_set.get_field_by_name(field_name).set_field_text(input_field.text)
+
+    def refresh_focus(self):
+        """
+        Updates the text controls in the UI with the text associated with the
+        "in focus" field set.
+        """
+        field_set = self.field_sets[self.focus_offset]
+        for field_name, input_field in self.filtering_field_inputs.items():
+            current_text = field_set.get_field_by_name(field_name).get_field_text()
+            input_field.text = current_text
+            input_field.trigger_full_render()
+
+        if self.focus_offset == 0:
+            self.previous_button.text = '<>'
+        else:
+            self.previous_button.text = f'<< Previous (#{self.focus_offset})'
+
+        if self.focus_offset + 1 == self.get_field_set_count():
+            self.next_button.text = f'Add OR (#{self.focus_offset + 2}) >>'  # Make the count 1 based for the UI
+        else:
+            self.next_button.text = f'Next OR (#{self.focus_offset + 2}) >>'  # Make the count 1 based for the UI
+
+    def _add_field_set(self):
+        self.field_sets.append(FilteringFields(list(self.filtering_field_inputs.keys())))
+
+    def any_fields_set(self) -> bool:
+        for field_set in self.field_sets:
+            if field_set.any_field_set():
+                return True
+        return False
+
+    def reset(self):
+        for field_set in self.field_sets:
+            field_set.reset()
+        self.refresh_focus()
+
+    def get_query_string(self) -> Optional[str]:
+        if not self.any_fields_set():
+            return None
+
+        query_string = ''
+        for field_set in self.field_sets:
+            addition = field_set.get_expression_component()
+            if addition:
+                if query_string:
+                    query_string += ' | '
+                addition = f'({addition})'
+                query_string += addition
+
+        return query_string
 
 
 class FilteringView(arcade.View):
@@ -1255,7 +1392,6 @@ class FilteringView(arcade.View):
         self.ei = ei
         self.manager = ui_manager
         self.graph_view = graph_view
-        self.filtering_fields: Set[FilteringField] = set()
 
         self.v_box = gui.UIBoxLayout()
 
@@ -1276,6 +1412,28 @@ class FilteringView(arcade.View):
         reset_button.on_click = self.on_reset_click
         self.v_box.add(reset_button)
 
+        or_buttons = gui.UIBoxLayout(vertical=False)
+        self.previous_or_button = gui.UIFlatButton(
+            color=arcade.color.DARK_BLUE_GRAY,
+            text='',
+            width=250
+        )
+        self.previous_or_button.active = False
+        or_buttons.add(self.previous_or_button.with_space_around(right=100, top=20, bottom=20))
+
+        self.next_or_button = gui.UIFlatButton(
+            color=arcade.color.DARK_BLUE_GRAY,
+            text='Next OR',
+            width=250
+        )
+        or_buttons.add(self.next_or_button.with_space_around(left=100, top=20, bottom=20))
+        self.or_fields_set = OrOfFilteringFields(previous_button=self.previous_or_button, next_button=self.next_or_button)
+
+        self.v_box.add(or_buttons)
+
+        # Create a texture that can be used to fill in the input fields.
+        input_field_bg = arcade.make_soft_square_texture(size=1000, color=(240, 240, 240), outer_alpha=255)
+
         for filtering_field_name in ('Category', 'Classification', 'Namespace', 'Pod', 'UID', 'Message'):
             filter_field_hbox = gui.UIBoxLayout(vertical=False)
             field_label = arcade.gui.UILabel(
@@ -1288,18 +1446,18 @@ class FilteringView(arcade.View):
             filter_field_hbox.add(field_label)
 
             # Create a text input field
-            field_filter_pattern = gui.UIInputText(
+            field_filter_ui_input = gui.UIInputText(
                 text_color=arcade.color.BLACK,
                 font_size=15,
                 width=800,
                 text=" ",
             )
-            field_filter_pattern.caret.visible = False
-            black_texture = arcade.make_soft_square_texture(size=1000, color=(240, 240, 240), outer_alpha=255)
-            filter_field_hbox.add(field_filter_pattern.with_background(black_texture).with_border(color=arcade.color.DARK_GRAY).with_space_around(top=20))
-            filtering_field = FilteringField(display_name=filtering_field_name, input_box=field_filter_pattern)
-            self.filtering_fields.add(filtering_field)
+            field_filter_ui_input.caret.visible = False
+            filter_field_hbox.add(field_filter_ui_input.with_background(input_field_bg).with_border(color=arcade.color.DARK_GRAY).with_space_around(top=20))
+            self.or_fields_set.add_new_field_to_track(filtering_field_name, field_filter_ui_input)
             self.v_box.add(filter_field_hbox)
+
+        self.or_fields_set.set_focus(0)
 
         buttons_hbox = gui.UIBoxLayout(vertical=False, space_between=20)
         # Create a button
@@ -1321,6 +1479,8 @@ class FilteringView(arcade.View):
 
         examples = arcade.gui.UITextArea(
             text='''
+Expressions in the fields above are combined with AND. Add an OR using 'Add OR' button.            
+            
 Simple Expression Examples:
     (disruption | alert)            => Contains substring "disruption" or "alert"
     not(disruption | alert)         => Must not contain substring "disruption" or "alert"
@@ -1353,14 +1513,8 @@ Complex Expression (do not mix with Simple):
         super().on_resize(window_width, window_height)
 
     def on_apply_click(self, event):
-        full_query_string = ''
-        for filtering_field in self.filtering_fields:
-            addition = filtering_field.get_query_string()
-            if addition:
-                addition = f'({addition})'
-                if full_query_string:
-                    full_query_string += ' & '
-                full_query_string += addition
+        self.or_fields_set.persist_focused_values()  # force existing values to be stored in data structure
+        full_query_string = self.or_fields_set.get_query_string()
         print(f'Updating query: {full_query_string}')
         try:
             self.ei.set_query(full_query_string)
@@ -1370,8 +1524,7 @@ Complex Expression (do not mix with Simple):
             pass
 
     def on_reset_click(self, event):
-        for filtering_field in self.filtering_fields:
-            filtering_field.input_box.text = ' '
+        self.or_fields_set.reset()
 
     def on_cancel_click(self, event):
         self.window.show_view(self.graph_view)
@@ -1411,7 +1564,6 @@ class MainWindow(arcade.Window):
         super().on_resize(width, height)
         self.graph_view.on_resize(width, height)
         self.filter_view.on_resize(width, height)
-        print(f"Window resized to: {width}, {height}")
 
     def on_key_press(self, symbol: int, modifiers: int):
         if symbol == arcade.key.F1 or symbol == arcade.key.SLASH:

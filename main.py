@@ -61,7 +61,7 @@ class MessageSection(arcade.Section):
         if not message:
             self.long_text.text = '''
 [R]=Reset Zoom  [+/-]=Timeline Height  [F1] Filtering
-[Home/End]=Scroll Top/Bottom  [PgUp/PgDown/\u2191/\u2193]=Scroll            
+[Home/End]=Scroll Top/Bottom  [PgUp/PgDown/\u2191/\u2193/\u2190/\u2192]=Scroll            
 '''.strip()  # Strip initial linefeed
         else:
             self.long_text.text = message

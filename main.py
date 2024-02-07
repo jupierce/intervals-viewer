@@ -1227,7 +1227,7 @@ class FilteringField:
             return None
 
         if FilteringField.SIMPLE_SEARCH_REGEX.match(expression):
-            substrings = re.split(r'([&|\s()])', expression)  # split using &, |, (, ), or space, and return a list containing delimiters
+            substrings = re.split(r'([&|()])', expression)  # split using &, |, (, ), and return a list containing delimiters
             expression = ''
             for substring in substrings:
                 substring = substring.strip()

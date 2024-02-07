@@ -4,8 +4,6 @@ from functools import lru_cache
 import pandas as pd
 import json
 import arcade
-import arcade.gui as gui
-import re
 
 from typing import Optional, List, Tuple, Dict, Set, Iterable
 
@@ -128,6 +126,7 @@ class DetailSection(arcade.Section):
         self.on_resize(self.window.width, self.window.height)
 
     def on_resize(self, window_width: int, window_height: int):
+        self.mouse_over_interval_text.x = window_width // 2
         self.background.position(left=Layout.DETAIL_SECTION_LEFT, width=window_width,
                                  bottom=Layout.DETAIL_SECTION_BOTTOM, height=Layout.DETAIL_SECTION_HEIGHT)
 
@@ -242,7 +241,16 @@ class DetailSection(arcade.Section):
         for common_annotation_keys in IntervalAnalyzer.get_message_annotation_names(interval):
             add_annotation_line(common_annotation_keys.capitalize(), common_annotation_keys)
 
-        message_section_ref.set_message(IntervalAnalyzer.get_message_attr(interval, 'humanMessage'))
+        display_message = ''
+        message_attr_val = IntervalAnalyzer.get_series_column_value(interval=interval, column_name='message')
+        if message_attr_val:
+            display_message = message_attr_val
+        human_message_val = IntervalAnalyzer.get_message_attr(interval, 'humanMessage')
+        if human_message_val:
+            if display_message:
+                display_message += '\n'
+            display_message += human_message_val
+        message_section_ref.set_message(display_message)
         self.mouse_over_interval_text.text = '\n'.join(lines)
 
         # The interval that the mouse is over is displayed in the detail section.
@@ -630,15 +638,18 @@ class IntervalsTimeline:
                         else:
                             clear_my_interval_detail()
             else:
-                # If the mouse is not over the timeline, it is definitely not over an interval
+                # If the mouse is not over the timeline, it is definitely n52462ot over an interval
                 # If we set the interval, clear it
                 clear_my_interval_detail()
 
     def get_category_name(self) -> str:
         return self.first_interval_row['category']
 
-    def get_locator_name(self) -> str:
+    def get_locator_value(self) -> str:
         return self.first_interval_row['locator']
+
+    def get_timeline_id(self) -> str:
+        return self.first_interval_row['timeline_id']
 
 
 class ZoomScrollBar(SimpleRect):
@@ -881,7 +892,7 @@ class GraphSection(arcade.Section):
         if self.first_visible_interval_timeline:
             # The user has zoomed with this row as the top of their view.
             previous_first_category = self.first_visible_interval_timeline.get_category_name()
-            previous_first_locator = self.first_visible_interval_timeline.get_locator_name()
+            previous_first_locator = self.first_visible_interval_timeline.get_locator_value()
 
         self.ei.zoom_to_dates(start, end)
 

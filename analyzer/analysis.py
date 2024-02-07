@@ -28,11 +28,18 @@ def get_interval_duration(row: pd.Series):
 
 
 def get_interval_classification(interval: pd.Series) -> pd.Series:
+    # by default, the records associated with a timeline share a locator, but we can decorate this in some cases
+
+    def series(classification: IntervalClassification) -> pd.Series:
+        timeline_id = classification.get_timeline_id(interval)
+        return pd.Series([timeline_id, classification, classification.display_name.lower()])
+
     classifications: List[IntervalClassification] = [e.value for e in IntervalClassifications]
     for classification in classifications:
         if classification.matches(interval):
-            return pd.Series([classification, classification.display_name.lower()])
-    return pd.Series([IntervalClassifications.UnknownClassification, IntervalClassifications.UnknownClassification.display_name.lower()])
+            return series(classification)
+
+    return series(IntervalClassifications.UnknownClassification.value)
 
 
 def get_interval_color(row: pd.Series) -> Union[arcade.Color, Tuple[int, int, int, int]]:
@@ -65,7 +72,7 @@ class EventsInspector:
         # self.events_df = self.events_df[-(self.events_df['tempStructuredMessage.annotations.interesting'] == 'false')]  # Notice the '-', which inverts the criteria
 
         # Classify an interval. The classification implies category and color for later decoration of the interval row.
-        self.events_df[['classification', 'classification_str']] = self.events_df.apply(get_interval_classification, axis=1)
+        self.events_df[['timeline_id', 'classification', 'classification_str']] = self.events_df.apply(get_interval_classification, axis=1)
 
         # Create a new row called category that will be used as the first grouping level for the
         # data. In the graph area, category for each timeline is shown on the left.
@@ -80,7 +87,7 @@ class EventsInspector:
         self.absolute_timeline_stop: pd.Timestamp = (events_df['to'].max()).ceil('min')
 
         # Order rows by category, locator, then make sure all rows are in chronological order
-        self.events_df = self.events_df.sort_values(['category', 'locator', 'from'], ascending=True)
+        self.events_df = self.events_df.sort_values(['category', 'timeline_id', 'from'], ascending=True)
 
         self.total_timeline_ns = int((self.absolute_timeline_start - self.absolute_timeline_start).to_timedelta64())
 
@@ -110,7 +117,7 @@ class EventsInspector:
         """
         df = self.selected_rows
         filtered_df = df[(df['to'] >= self.zoom_timeline_start) & (df['from'] <= self.zoom_timeline_stop)]
-        self.grouped_intervals = filtered_df.groupby(['category', 'locator'])
+        self.grouped_intervals = filtered_df.groupby(['category', 'timeline_id'])
 
     def set_query(self, query: Optional[str] = None):
         if query:

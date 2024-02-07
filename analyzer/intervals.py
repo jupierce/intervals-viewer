@@ -113,12 +113,17 @@ class IntervalClassification:
     def __init__(self, display_name: str,
                  category: IntervalCategory, color: Optional[arcade.Color] = arcade.color.GRAY,
                  series_matcher: Optional[Callable[[pd.Series], bool]] = None,
-                 simple_series_matcher: Optional[SimpleIntervalMatcher] = None):
+                 simple_series_matcher: Optional[SimpleIntervalMatcher] = None,
+                 timeline_differentiator: Optional[str] = None,):
         self.display_name = display_name
         self.category: IntervalCategory = category
         self.color = color
         self.does_series_match = series_matcher
         self.simple_series_matcher = simple_series_matcher
+        # If this interval classification should cause records with the same locator
+        # to appear on different timelines, differentiate the timeline with an additional string.
+        # For example, ContainerLifecycle and ContainerReadiness
+        self.timeline_differentiator = timeline_differentiator
 
     def matches(self, interval: pd.Series) -> bool:
         if self.simple_series_matcher:
@@ -127,6 +132,9 @@ class IntervalClassification:
             return self.does_series_match(interval)
         return False
 
+    def get_timeline_id(self, interval: pd.Series):
+        locator = interval['locator']
+        return f'{locator} {self.timeline_differentiator}'
 
 def hex_to_color(hex_color_code) -> arcade.Color:
     # Remove '#' if present
@@ -395,7 +403,8 @@ class IntervalClassifications(Enum):
             annotations_match={
                 'reason': 'ContainerWait',
             }
-        )
+        ),
+        timeline_differentiator='container-lifecycle'
     )
     ContainerStart = IntervalClassification(
         display_name='ContainerStart',
@@ -406,7 +415,8 @@ class IntervalClassifications(Enum):
             annotations_match={
                 'reason': 'ContainerStart',
             }
-        )
+        ),
+        timeline_differentiator='container-lifecycle'
     )
     ContainerNotReady = IntervalClassification(
         display_name='ContainerNotReady',
@@ -417,7 +427,8 @@ class IntervalClassifications(Enum):
             annotations_match={
                 'reason': 'NotReady',
             }
-        )
+        ),
+        timeline_differentiator='container-readiness'
     )
     ContainerReady = IntervalClassification(
         display_name='ContainerReady',
@@ -428,7 +439,8 @@ class IntervalClassifications(Enum):
             annotations_match={
                 'reason': 'Ready',
             }
-        )
+        ),
+        timeline_differentiator='container-readiness'
     )
     ContainerReadinessFailed = IntervalClassification(
         display_name='ContainerReadinessFailed',
@@ -439,7 +451,8 @@ class IntervalClassifications(Enum):
             annotations_match={
                 'reason': 'ReadinessFailed',
             }
-        )
+        ),
+        timeline_differentiator='container-readiness'
     )
     ContainerReadinessErrored = IntervalClassification(
         display_name='ContainerReadinessErrored',
@@ -450,7 +463,8 @@ class IntervalClassifications(Enum):
             annotations_match={
                 'reason': 'ReadinessErrored',
             }
-        )
+        ),
+        timeline_differentiator='container-readiness'
     )
     StartupProbeFailed = IntervalClassification(
         display_name='StartupProbeFailed',
@@ -460,7 +474,8 @@ class IntervalClassifications(Enum):
             annotations_match={
                 'reason': 'StartupProbeFailed',
             }
-        )
+        ),
+        timeline_differentiator='container-readiness'
     )
 
     # Disruption

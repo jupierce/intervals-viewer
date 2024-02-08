@@ -114,9 +114,9 @@ class EventsInspector:
         self.selected_rows = self.events_df
 
         self.set_filter_query(self.last_filter_query)  # Re-apply the filter to apply to combined data
-        self.notify_of_timeline_date_range_change()
+        self.select_timelines_active_in_range()
 
-    def notify_of_timeline_date_range_change(self):
+    def select_timelines_active_in_range(self):
         """
         Call whenever the selected rows have been modified
         """
@@ -134,7 +134,7 @@ class EventsInspector:
         else:
             self.selected_rows = self.events_df
         self.last_filter_query = query
-        self.notify_of_timeline_date_range_change()
+        self.select_timelines_active_in_range()
 
     def on_zoom_resize(self, timeline_width):
         self.current_timeline_width = timeline_width
@@ -142,7 +142,7 @@ class EventsInspector:
         self.current_zoom_timeline_seconds = seconds_between(self.zoom_timeline_start, self.zoom_timeline_stop)
         self.current_pixels_per_second_in_timeline: float = self.calculate_pixels_per_second(self.current_timeline_width)
 
-    def zoom_to_dates(self, from_dt: datetime, to_dt: datetime):
+    def zoom_to_dates(self, from_dt: datetime, to_dt: datetime, refilter_based_on_date_range=False):
 
         # If the from and to are in reserve chronological order, correct it
         if from_dt > to_dt:
@@ -162,7 +162,8 @@ class EventsInspector:
 
         self.zoom_timeline_start = from_dt
         self.zoom_timeline_stop = to_dt
-        self.notify_of_timeline_date_range_change()
+        if refilter_based_on_date_range:
+            self.select_timelines_active_in_range()
         self.on_zoom_resize(self.current_timeline_width)
 
     def get_current_timeline_width(self):

@@ -297,6 +297,11 @@ class ColorLegendEntry(SimpleRect):
 
     def draw(self):
         super().draw()
+        mouse_over_interval = detail_section_ref.mouse_over_interval
+        if mouse_over_interval is not None and mouse_over_interval['classification'] == self.classification:
+            self.category_text.bold = True
+        elif self.category_text.bold:
+            self.category_text.bold = False
         self.category_text.draw()
 
 
@@ -1127,11 +1132,16 @@ class GraphSection(arcade.Section):
     def on_mouse_press(self, x: int, y: int, button: int, modifiers: int):
         self.mouse_button_down[button] = (x, y, modifiers)
 
+    def location_within_timeline_area(self, x: int, y: int) -> bool:
+        if x >= self.category_bar.right and x < self.zoom_scroll_bar.left and y <= self.zoom_date_range_display_bar.bottom and y > self.category_bar.bottom:
+            return True
+        else:
+            return False
+
     def on_mouse_motion(self, x: int, y: int, dx: Optional[int] = None, dy: Optional[int] = None):
         global detail_section_ref
 
-        if x >= self.category_bar.right and x < self.zoom_scroll_bar.left and \
-                y <= self.zoom_date_range_display_bar.bottom and y > self.category_bar.bottom:
+        if self.location_within_timeline_area(x, y):
             self.mouse_over_timeline_area = True
             self.mouse_timeline_area_offset_x = x - self.category_bar.right
             self.mouse_timeline_area_offset_y = y - self.category_bar.bottom
@@ -1140,13 +1150,14 @@ class GraphSection(arcade.Section):
 
         if arcade.MOUSE_BUTTON_LEFT in self.mouse_button_down:
             from_x, from_y, with_mod = self.mouse_button_down[arcade.MOUSE_BUTTON_LEFT]
-            if abs(from_x - x) + abs(from_y - y) > 5:
-                # If the mouse has moved at least 5 pixels from where the button first went down
-                # create an active drag.
-                self.mouse_button_active_drag[arcade.MOUSE_BUTTON_LEFT] = (x, y)
-            else:
-                # If there was an active drag, cancel it
-                self.mouse_button_active_drag.pop(arcade.MOUSE_BUTTON_LEFT, None)
+            if self.location_within_timeline_area(from_x, from_y):  # Only permit drag if the starting location is within the graphing area
+                if abs(from_x - x) + abs(from_y - y) > 5:
+                    # If the mouse has moved at least 5 pixels from where the button first went down
+                    # create an active drag.
+                    self.mouse_button_active_drag[arcade.MOUSE_BUTTON_LEFT] = (x, y)
+                else:
+                    # If there was an active drag, cancel it
+                    self.mouse_button_active_drag.pop(arcade.MOUSE_BUTTON_LEFT, None)
 
         if self.mouse_over_timeline_area:
             from_dt = None  # will be set to the datetime associated with the origin of a mouse drag, if one is active

@@ -157,7 +157,7 @@ class DetailSection(arcade.Section):
         from_dt = self.mouse_from_time_dt
         dt = self.mouse_over_time_dt
 
-        text = f'Mouse[ ({dt})'
+        text = f'Mouse[ ({dt}) {self.ei.last_known_mouse_location}'
         # from_dt is passed in if there is a mouse dragging operation. The click before the
         # drag began is used to calculate a time offset for the initial mouse position.
         if from_dt:
@@ -546,7 +546,7 @@ class IntervalsTimeline:
         :param interval_row: An interval on the timeline.
         :return: (start_x, end_x)
         """
-        interval_left_offset = self.ei.calculate_left_offset(self.timeline_row_width, interval_row)
+        interval_left_offset = self.ei.current_interval_left_offset(interval_row)
         interval_width = self.ei.calculate_interval_width(self.timeline_row_width, interval_row)
         interval_line_start_x = interval_left_offset
         interval_line_end_x = interval_left_offset + interval_width
@@ -638,7 +638,7 @@ class IntervalsTimeline:
                         else:
                             clear_my_interval_detail()
             else:
-                # If the mouse is not over the timeline, it is definitely n52462ot over an interval
+                # If the mouse is not over the timeline, it is definitely not over an interval
                 # If we set the interval, clear it
                 clear_my_interval_detail()
 
@@ -796,7 +796,7 @@ class GraphSection(arcade.Section):
     # Updating the information about the selected timeline and interval
     # is a relatively expensive operation. So do it only as fast as a human
     # could conceivably react to the information.
-    PERIOD_BETWEEN_INTERVAL_DETAIL_UPDATE: float = 1 / 4
+    PERIOD_BETWEEN_INTERVAL_DETAIL_UPDATE: float = 1 / 10
 
     def __init__(self, ei: EventsInspector, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -892,7 +892,7 @@ class GraphSection(arcade.Section):
         if self.first_visible_interval_timeline:
             # The user has zoomed with this row as the top of their view.
             previous_first_category = self.first_visible_interval_timeline.get_category_name()
-            previous_first_locator = self.first_visible_interval_timeline.get_locator_value()
+            first_timeline_id = self.first_visible_interval_timeline.get_timeline_id()
 
         self.ei.zoom_to_dates(start, end)
 
@@ -906,10 +906,10 @@ class GraphSection(arcade.Section):
         target_for_scroll: Optional[int] = None  # if we can't find anything close, scroll back to the top
         timeline_number = 0
         for row_id_tuple in self.ei.grouped_intervals.groups.keys():
-            # Intervals are grouped by category, and then locator. So a group
-            # key will be a tuple (category, locator).
+            # Intervals are grouped by category, and then timeline_id. So a group
+            # key will be a tuple (category, timeline_id).
             row_category, row_locator = row_id_tuple
-            if row_category >= previous_first_category and row_locator >= previous_first_locator:
+            if row_category >= previous_first_category and row_locator >= first_timeline_id:
                 target_for_scroll = timeline_number
                 break
             timeline_number += 1

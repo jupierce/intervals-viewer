@@ -75,6 +75,10 @@ class EventsInspector:
         new_events = pd.DataFrame.from_dict(pd.json_normalize(intervals), orient='columns')
         new_events['classification'] = None  # Initialize classification to null for all rows
 
+        # Requires string columns
+        for required_column in ('category', 'category_str_lower', 'classification_str_lower', 'timeline_diff'):
+            new_events[required_column] = ''
+
         # Provide each classification an opportunity to choose the rows it represents. IntervalClassifications
         # will enumerate in order, and the first classification to claim a row will keep it.
         for classifier in IntervalClassifications:

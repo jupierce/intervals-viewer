@@ -1,5 +1,5 @@
 import datetime
-from typing import Optional
+from typing import Optional, Dict
 
 import arcade
 
@@ -124,3 +124,17 @@ def make_color_brighter(color: arcade.Color, factor=1.2) -> arcade.Color:
     g = min(int(color[1] * factor), 255)
     b = min(int(color[2] * factor), 255)
     return r, g, b, 255
+
+
+def prioritized_sort(entry):
+    # When these words are in a list to be sorted, ensure they are listed first, and in this order.
+    required_subset_ordering: Dict[str, int] = {
+        'namespace': 0,
+        'pod': 1,
+        'container': 2
+    }
+
+    # Return a tuple with two elements - the first is the subset order or a high value
+    # if the word is not in the subset, and the second is the word itself
+    return (required_subset_ordering.get(entry, float('inf')), entry)
+

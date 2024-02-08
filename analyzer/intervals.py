@@ -2,6 +2,7 @@ import pandas as pd
 from enum import Enum
 from typing import Optional, Union, List, Callable, Set, Dict
 import arcade
+from .util import prioritized_sort
 
 
 class IntervalCategory(Enum):
@@ -135,6 +136,7 @@ class IntervalClassification:
     def get_timeline_id(self, interval: pd.Series):
         locator = interval['locator']
         return f'{locator} {self.timeline_differentiator}'
+
 
 def hex_to_color(hex_color_code) -> arcade.Color:
     # Remove '#' if present
@@ -599,12 +601,12 @@ class IntervalAnalyzer:
 
     @classmethod
     def get_column_names(cls, interval: pd.Series, column_name_prefix: str) -> List[str]:
-        selected_col_names: List[str] = list()
+        selected_col_names: Set[str] = set()
         prefix_length = len(column_name_prefix)
         for column_name in interval.index.tolist():
             if str(column_name).startswith(column_name_prefix):
                 column_name = column_name[prefix_length:]
-                selected_col_names.append(column_name)
+                selected_col_names.add(column_name)
         return sorted(selected_col_names)
 
     @classmethod
@@ -613,4 +615,5 @@ class IntervalAnalyzer:
 
     @classmethod
     def get_locator_key_names(cls, interval: pd.Series):
-        return IntervalAnalyzer.get_column_names(interval, IntervalAnalyzer.STRUCTURED_LOCATOR_KEY_PREFIX)
+        key_names = IntervalAnalyzer.get_column_names(interval, IntervalAnalyzer.STRUCTURED_LOCATOR_KEY_PREFIX)
+        return sorted(key_names, key=prioritized_sort)

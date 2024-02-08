@@ -1,19 +1,56 @@
 import traceback
-from typing import Callable
+from typing import Callable, Optional
 
 import pyperclip
+import threading
 
+import io
 import arcade
 import arcade.gui as gui
 
 import requests
 from ui.layout import Theme
 
+from contextlib import closing
+
+
+class DownloadStatus:
+
+    def __init__(self):
+        self.message = ''
+        self.buffer = io.BytesIO()
+        self.exception = None
+        self.complete = False
+
+
+def download_file(url, status_lock, status: DownloadStatus):
+    try:
+        with closing(requests.get(url, stream=True)) as response:
+            response.raise_for_status()
+            downloaded_size = 0
+            for chunk in response.iter_content(chunk_size=1024*1024):
+                if chunk:
+                    downloaded_size += len(chunk)
+                    mb = downloaded_size / (1024*1024)
+                    with status_lock:
+                        status.buffer.write(chunk)
+                        status.message = f'Downloading.. {mb:.2f}MB'
+
+    except Exception as e:
+        with status_lock:
+            status.exception = e
+        traceback.print_exc()
+    finally:
+        with status_lock:
+            status.complete = True
+            status.buffer.seek(0)
+
 
 class ImportTimelineView(arcade.View):
 
     def __init__(self, window: arcade.Window, load_data: Callable):
         super().__init__(window)
+        self.download_checker: Optional[Callable] = None
         self.manager = arcade.gui.UIManager()
         self.load_data = load_data
 
@@ -55,12 +92,12 @@ class ImportTimelineView(arcade.View):
 
         buttons_hbox = gui.UIBoxLayout(vertical=False, space_between=20)
         # Create a button
-        import_button = gui.UIFlatButton(
+        self.import_button = gui.UIFlatButton(
             color=arcade.color.DARK_BLUE_GRAY,
             text='Import'
         )
-        import_button.on_click = self.on_import_click
-        buttons_hbox.add(import_button)
+        self.import_button.on_click = self.on_import_click
+        buttons_hbox.add(self.import_button)
 
         self.v_box.add(buttons_hbox.with_space_around(top=20))
 
@@ -86,22 +123,30 @@ class ImportTimelineView(arcade.View):
     def on_resize(self, window_width: int, window_height: int):
         super().on_resize(window_width, window_height)
 
+    def check_download(self, download_thread: threading.Thread, status_lock: threading.Lock, status: DownloadStatus):
+        def set_status_area(description: str):
+            self.status_area.text = description
+            self.on_draw()
+
+        with status_lock:
+            set_status_area(status.message)
+            if status.complete:
+                if status.exception is None:
+                    print('Loading data..')
+                    self.load_data(status.buffer)
+                print('Joining thread...')
+                download_thread.join()
+                arcade.unschedule(self.download_checker)
+
     def on_import_click(self, event):
-        try:
-            self.status_area.text = 'Loading...'
-            url = self.url_ui_input.text
-            with requests.get(url, stream=True) as response:
-                if response.status_code == 200:
-                    with response.raw as stream:
-                        self.load_data(stream)
-                else:
-                    print(f"Failed to download file. Status code: {response.status_code}")
-                    self.status_area.text = f"Failed to download file. Status code: {response.status_code}\n{response.text}"
-        except:
-            err = f"Failed to download file:\n{traceback.format_exc()}"
-            self.status_area.text = err
-            traceback.print_exc()
-            pass
+        download_url = self.url_ui_input.text
+        status_lock = threading.Lock()
+        download_status = DownloadStatus()
+        download_thread = threading.Thread(target=download_file,
+                                           args=(download_url, status_lock, download_status))
+        download_thread.start()
+        self.download_checker = lambda delta: self.check_download(download_thread, status_lock, download_status)
+        arcade.schedule(self.download_checker, 1.0)
 
     def on_draw(self):
         self.clear()

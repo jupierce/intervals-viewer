@@ -4,588 +4,6 @@ from typing import Optional, Union, List, Callable, Set, Dict
 import arcade
 from .util import prioritized_sort
 
-
-class IntervalCategory(Enum):
-    Alert = 'Alert'
-    KubeEvent = 'KubeEvent'
-    KubeletLog = 'KubeletLog'
-    NodeState = 'NodeState'
-    OperatorState = 'OperatorState'
-    Pod = 'Pod'
-    E2ETest = 'E2ETest'
-    Disruption = 'Disruption'
-    ClusterState = 'ClusterState'
-    PodLog = 'PodLog'
-
-    # Not a real category for display, but serves to classify & color when a classification
-    # is not specific to one category.
-    Any = '*'
-
-    Unclassified = 'Unclassified'
-
-
-SingleStrOrSet = Union[str, Set[str]]
-OptionalSingleStrOrSet = Optional[SingleStrOrSet]
-
-
-class SimpleIntervalMatcher:
-    """
-    Provides an easy way to specify how to classify an interval by
-    identifying values for attributes which must be set (and to what values, if desired).
-    """
-    def __init__(self, temp_source: OptionalSingleStrOrSet = None,
-                 locator_type: OptionalSingleStrOrSet = None,
-                 locator_keys_exist: Optional[Set[str]] = None,
-                 locator_keys_match: Optional[Dict[str, str]] = None,
-                 reason: OptionalSingleStrOrSet = None,
-                 cause: OptionalSingleStrOrSet = None,
-                 annotations_exist: Optional[Set[str]] = None,
-                 annotations_match: Optional[Dict[str, str]] = None,
-                 message_contains: Optional[str] = None,
-                 ):
-        self.temp_source = temp_source
-        self.locator_type = locator_type
-        self.locator_keys_exist: Optional[Set[str]] = locator_keys_exist
-        self.locator_keys_match: Optional[Dict[str, str]] = locator_keys_match
-        self.reason: Optional[str] = reason
-        self.cause: Optional[str] = cause
-        self.annotations_exist: Optional[Set[str]] = annotations_exist
-        self.annotations_match: Optional[Dict[str, str]] = annotations_match
-        self.message_contains: Optional[str] = message_contains
-
-    def matches(self, interval_dict: Dict) -> bool:
-
-        def matches_any(actual_value, options: OptionalSingleStrOrSet):
-            if isinstance(options, str):
-                return actual_value == options
-            else:
-                return actual_value in options  # Treat as a Set
-
-        def get(*args):
-            """
-            Args:
-                *args: a list of strings that represent a set of keys that should be accessed, in order (locator, key, ...) in order
-                to find a value in the interval dictionary. If any key along the path does not exist, None is returned.
-            """
-            v = interval_dict
-            for key in args:
-                v = v.get(key, None)
-                if v is None:
-                    return v
-            return v
-
-        if self.temp_source:
-            if not matches_any(get('tempSource'), self.temp_source):
-                return False
-        elif self.locator_type:
-            if not matches_any(get(IntervalAnalyzer.STRUCTURED_LOCATOR_ATTR_NAME, 'type'), self.locator_type):
-                return False
-        else:
-            # .matches must be fairly fast to run on average, so prevent overly board selection.
-            raise IOError('For performance reasons, specify either a temp_source or locator_type')
-
-        if self.reason:
-            if not matches_any(get(IntervalAnalyzer.STRUCTURED_MESSAGE_ATTR_NAME, 'reason'), self.reason):
-                return False
-
-        if self.cause:
-            if not matches_any(get(IntervalAnalyzer.STRUCTURED_MESSAGE_ATTR_NAME, 'cause'), self.cause):
-                return False
-
-        if self.locator_keys_exist:
-            for locator_key in self.locator_keys_exist:
-                if get(IntervalAnalyzer.STRUCTURED_LOCATOR_ATTR_NAME, 'keys', locator_key) is None:
-                    return False
-
-        if self.message_contains:
-            message = get('message')
-            if not message or self.message_contains not in message:
-                return False
-
-        def required_value_matches(actual_value: str, required_value: str):
-            if actual_value:
-                actual_value = actual_value.lower()
-            if required_value:
-                required_value = required_value.lower()
-            return actual_value == required_value
-
-        if self.locator_keys_match:
-            for locator_key, required_value in self.locator_keys_match.items():
-                if not required_value_matches(get(IntervalAnalyzer.STRUCTURED_LOCATOR_ATTR_NAME, 'keys', locator_key), required_value):
-                    return False
-
-        if self.annotations_exist:
-            for annotation_name in self.annotations_exist:
-                if get(IntervalAnalyzer.STRUCTURED_MESSAGE_ATTR_NAME, 'annotations', annotation_name) is None:
-                    return False
-
-        if self.annotations_match:
-            for annotation_name, required_value in self.annotations_match.items():
-                if not required_value_matches(get(IntervalAnalyzer.STRUCTURED_MESSAGE_ATTR_NAME, 'annotations', annotation_name), required_value):
-                    return False
-
-        return True
-
-
-class IntervalClassification:
-
-    def __init__(self, display_name: str,
-                 category: IntervalCategory, color: Optional[arcade.Color] = arcade.color.GRAY,
-                 series_matcher: Optional[Callable[[Dict], bool]] = None,
-                 simple_series_matcher: Optional[SimpleIntervalMatcher] = None,
-                 timeline_differentiator: Optional[str] = None,):
-        self.display_name = display_name
-        self.category: IntervalCategory = category
-        self.color = color
-        self.does_series_match = series_matcher
-        self.simple_series_matcher = simple_series_matcher
-        # If this interval classification should cause records with the same locator
-        # to appear on different timelines, differentiate the timeline with an additional string.
-        # For example, ContainerLifecycle and ContainerReadiness
-        self.timeline_differentiator = timeline_differentiator
-
-    def matches(self, interval_dict: Dict) -> bool:
-        if self.simple_series_matcher:
-            return self.simple_series_matcher.matches(interval_dict)
-        if self.does_series_match:
-            return self.does_series_match(interval_dict)
-        return False
-
-    def decorate_interval(self, interval_dict: Dict):
-        interval_dict['timeline_id'] = f"{interval_dict['locator']} {self.timeline_differentiator}"
-        interval_dict['classification'] = self
-        interval_dict['classification_str'] = self.display_name.lower()
-        interval_dict['category'] = self.category.value
-        interval_dict['category_str'] = self.category.value.lower()
-        interval_dict['color'] = self.color
-
-
-def hex_to_color(hex_color_code) -> arcade.Color:
-    # Remove '#' if present
-    hex_color_code = hex_color_code.lstrip('#')
-
-    # Extract RGB and optionally alpha
-    if len(hex_color_code) == 6:
-        color_tuple = tuple(int(hex_color_code[i:i+2], 16) for i in (0, 2, 4)) + (255,)  # Add alpha=255 if not provided
-    elif len(hex_color_code) == 8:
-        color_tuple = tuple(int(hex_color_code[i:i+2], 16) for i in (0, 2, 4, 6))
-    else:
-        raise ValueError("Invalid hex color code length")
-
-    return color_tuple
-
-
-class IntervalClassifications(Enum):
-
-    # KubeEvents
-    PathologicalKnown = IntervalClassification(
-        display_name='PathologicalKnown',
-        category=IntervalCategory.KubeEvent,
-        color=hex_to_color('#0000ff'),
-        simple_series_matcher=SimpleIntervalMatcher(
-            temp_source='KubeEvent',
-            annotations_match={
-                'interesting': 'true',
-                'pathological': 'true',
-            }
-        )
-    )
-
-    InterestingEvent = IntervalClassification(
-        display_name='InterestingEvent',
-        category=IntervalCategory.KubeEvent,
-        color=hex_to_color('#6E6E6E'),
-        simple_series_matcher=SimpleIntervalMatcher(
-            temp_source='KubeEvent',
-            annotations_match={
-                'interesting': 'true'
-            }
-        )
-    )
-    PathologicalNew = IntervalClassification(
-        # PathologicalKnown will capture if interesting=true. New will fall through
-        # and be captured here.
-        display_name='PathologicalNew',
-        category=IntervalCategory.KubeEvent,
-        color=hex_to_color('#d0312d'),
-        simple_series_matcher=SimpleIntervalMatcher(
-            temp_source='KubeEvent',
-            annotations_match={
-                'pathological': 'true',
-            }
-        )
-    )
-
-    # Alerts
-    AlertPending = IntervalClassification(
-        display_name='AlertPending',
-        category=IntervalCategory.Alert, color=hex_to_color('#fada5e'),
-        simple_series_matcher=SimpleIntervalMatcher(
-            temp_source='Alert',
-            annotations_match={
-                'pending': 'true',
-            }
-        )
-    )
-    AlertInfo = IntervalClassification(
-        display_name='AlertInfo',
-        category=IntervalCategory.Alert, color=hex_to_color('#fada5e'),
-        simple_series_matcher=SimpleIntervalMatcher(
-            temp_source='Alert',
-            annotations_match={
-                'severity': 'info',
-            }
-        )
-    )
-    AlertWarning = IntervalClassification(
-        display_name='AlertWarning',
-        category=IntervalCategory.Alert, color=hex_to_color('#ffa500'),
-        simple_series_matcher=SimpleIntervalMatcher(
-            temp_source='Alert',
-            annotations_match={
-                'severity': 'warning',
-            }
-        )
-    )
-    AlertCritical = IntervalClassification(
-        display_name='AlertCritical',
-        category=IntervalCategory.Alert, color=hex_to_color('#d0312d'),
-        simple_series_matcher=SimpleIntervalMatcher(
-            temp_source='Alert',
-            annotations_match={
-                'severity': 'critical',
-            }
-        )
-    )
-
-    # Operator
-    OperatorUnavailable = IntervalClassification(
-        display_name='OperatorUnavailable',
-        category=IntervalCategory.OperatorState, color=hex_to_color('#d0312d'),
-        simple_series_matcher=SimpleIntervalMatcher(
-            temp_source='OperatorState',
-            annotations_match={
-                'condition': 'Available',
-                'status': 'false',
-            }
-        )
-    )
-    OperatorDegraded = IntervalClassification(
-        display_name='OperatorDegraded',
-        category=IntervalCategory.OperatorState, color=hex_to_color('#ffa500'),
-        simple_series_matcher=SimpleIntervalMatcher(
-            temp_source='OperatorState',
-            annotations_match={
-                'condition': 'Degraded',
-                'status': 'true',
-            }
-        )
-    )
-    OperatorProgressing = IntervalClassification(
-        display_name='OperatorProgressing',
-        category=IntervalCategory.OperatorState, color=hex_to_color('#fada5e'),
-        simple_series_matcher=SimpleIntervalMatcher(
-            temp_source='OperatorState',
-            annotations_match={
-                'condition': 'Progressing',
-                'status': 'true',
-            }
-        )
-    )
-
-    # Node
-    NodeDrain = IntervalClassification(
-        display_name='NodeDrain',
-        category=IntervalCategory.NodeState, color=hex_to_color('#4294e6'),
-        simple_series_matcher=SimpleIntervalMatcher(
-            locator_type='Node',
-            annotations_match={
-                'phase': 'Drain',
-            }
-        )
-    )
-    NodeReboot = IntervalClassification(
-        display_name='NodeReboot',
-        category=IntervalCategory.NodeState, color=hex_to_color('#6aaef2'),
-        simple_series_matcher=SimpleIntervalMatcher(
-            locator_type='Node',
-            annotations_match={
-                'phase': 'Reboot',
-            }
-        )
-    )
-    NodeOperatingSystemUpdate = IntervalClassification(
-        display_name='NodeOperatingSystemUpdate',
-        category=IntervalCategory.NodeState, color=hex_to_color('#96cbff'),
-        simple_series_matcher=SimpleIntervalMatcher(
-            locator_type='Node',
-            annotations_match={
-                'phase': 'OperatingSystemUpdate',
-            }
-        )
-    )
-    NodeUpdate = IntervalClassification(
-        display_name='NodeUpdate',
-        category=IntervalCategory.NodeState, color=hex_to_color('#1e7bd9'),
-        simple_series_matcher=SimpleIntervalMatcher(
-            locator_type='Node',
-            annotations_match={
-                'reason': 'NodeUpdate',
-            }
-        )
-    )
-    NodeNotReady = IntervalClassification(
-        display_name='NodeNotReady',
-        category=IntervalCategory.NodeState, color=hex_to_color('#fada5e'),
-        simple_series_matcher=SimpleIntervalMatcher(
-            locator_type='Node',
-            annotations_match={
-                'reason': 'NotReady',
-            }
-        )
-    )
-
-    # Tests
-    TestPassed = IntervalClassification(
-        display_name='TestPassed',
-        category=IntervalCategory.E2ETest, color=hex_to_color('#3cb043'),
-        simple_series_matcher=SimpleIntervalMatcher(
-            temp_source='E2ETest',
-            annotations_match={
-                'status': 'Passed',
-            }
-        )
-    )
-    TestSkipped = IntervalClassification(
-        display_name='TestSkipped',
-        category=IntervalCategory.E2ETest, color=hex_to_color('#ceba76'),
-        simple_series_matcher=SimpleIntervalMatcher(
-            temp_source='E2ETest',
-            annotations_match={
-                'status': 'Skipped',
-            }
-        )
-    )
-    TestFlaked = IntervalClassification(
-        display_name='TestFlaked',
-        category=IntervalCategory.E2ETest, color=hex_to_color('#ffa500'),
-        simple_series_matcher=SimpleIntervalMatcher(
-            temp_source='E2ETest',
-            annotations_match={
-                'status': 'Flaked',
-            }
-        )
-    )
-    TestFailed = IntervalClassification(
-        display_name='TestFailed',
-        category=IntervalCategory.E2ETest, color=hex_to_color('#d0312d'),
-        simple_series_matcher=SimpleIntervalMatcher(
-            temp_source='E2ETest',
-            annotations_match={
-                'status': 'Failed',
-            }
-        )
-    )
-
-    # Pods
-    PodCreated = IntervalClassification(
-        display_name='PodCreated',
-        category=IntervalCategory.Pod, color=hex_to_color('#96cbff'),
-        simple_series_matcher=SimpleIntervalMatcher(
-            temp_source='PodState',
-            annotations_match={
-                'reason': 'Created',
-            }
-        )
-    )
-    PodScheduled = IntervalClassification(
-        display_name='PodScheduled',
-        category=IntervalCategory.Pod, color=hex_to_color('#1e7bd9'),
-        simple_series_matcher=SimpleIntervalMatcher(
-            temp_source='PodState',
-            annotations_match={
-                'reason': 'Scheduled',
-            }
-        )
-    )
-    PodTerminating = IntervalClassification(
-        display_name='PodTerminating',
-        category=IntervalCategory.Pod, color=hex_to_color('#ffa500'),
-        simple_series_matcher=SimpleIntervalMatcher(
-            temp_source='PodState',
-            annotations_match={
-                'reason': 'GracefulDelete',
-            }
-        )
-    )
-    ContainerWait = IntervalClassification(
-        display_name='ContainerWait',
-        category=IntervalCategory.Pod, color=hex_to_color('#ca8dfd'),
-        simple_series_matcher=SimpleIntervalMatcher(
-            temp_source='PodState',
-            locator_keys_exist={'container'},
-            annotations_match={
-                'reason': 'ContainerWait',
-            }
-        ),
-        timeline_differentiator='container-lifecycle'
-    )
-    ContainerStart = IntervalClassification(
-        display_name='ContainerStart',
-        category=IntervalCategory.Pod, color=hex_to_color('#9300ff'),
-        simple_series_matcher=SimpleIntervalMatcher(
-            temp_source='PodState',
-            locator_keys_exist={'container'},
-            annotations_match={
-                'reason': 'ContainerStart',
-            }
-        ),
-        timeline_differentiator='container-lifecycle'
-    )
-    ContainerNotReady = IntervalClassification(
-        display_name='ContainerNotReady',
-        category=IntervalCategory.Pod, color=hex_to_color('#fada5e'),
-        simple_series_matcher=SimpleIntervalMatcher(
-            temp_source='PodState',
-            locator_keys_exist={'container'},
-            annotations_match={
-                'reason': 'NotReady',
-            }
-        ),
-        timeline_differentiator='container-readiness'
-    )
-    ContainerReady = IntervalClassification(
-        display_name='ContainerReady',
-        category=IntervalCategory.Pod, color=hex_to_color('#3cb043'),
-        simple_series_matcher=SimpleIntervalMatcher(
-            temp_source='PodState',
-            locator_keys_exist={'container'},
-            annotations_match={
-                'reason': 'Ready',
-            }
-        ),
-        timeline_differentiator='container-readiness'
-    )
-    ContainerReadinessFailed = IntervalClassification(
-        display_name='ContainerReadinessFailed',
-        category=IntervalCategory.Pod, color=hex_to_color('#d0312d'),
-        simple_series_matcher=SimpleIntervalMatcher(
-            temp_source='PodState',
-            locator_keys_exist={'container'},
-            annotations_match={
-                'reason': 'ReadinessFailed',
-            }
-        ),
-        timeline_differentiator='container-readiness'
-    )
-    ContainerReadinessErrored = IntervalClassification(
-        display_name='ContainerReadinessErrored',
-        category=IntervalCategory.Pod, color=hex_to_color('#d0312d'),
-        simple_series_matcher=SimpleIntervalMatcher(
-            temp_source='PodState',
-            locator_keys_exist={'container'},
-            annotations_match={
-                'reason': 'ReadinessErrored',
-            }
-        ),
-        timeline_differentiator='container-readiness'
-    )
-    StartupProbeFailed = IntervalClassification(
-        display_name='StartupProbeFailed',
-        category=IntervalCategory.Pod, color=hex_to_color('#c90076'),
-        simple_series_matcher=SimpleIntervalMatcher(
-            temp_source='PodState',
-            annotations_match={
-                'reason': 'StartupProbeFailed',
-            }
-        ),
-        timeline_differentiator='container-readiness'
-    )
-
-    # Disruption
-    CIClusterDisruption = IntervalClassification(
-        display_name='CIClusterDisruption',
-        category=IntervalCategory.Disruption, color=hex_to_color('#96cbff'),
-        simple_series_matcher=SimpleIntervalMatcher(
-            temp_source='Disruption',
-            message_contains='likely a problem in cluster running tests',
-        )
-    )
-    Disruption = IntervalClassification(
-        display_name='Disruption',
-        category=IntervalCategory.Disruption, color=hex_to_color('#d0312d'),
-        simple_series_matcher=SimpleIntervalMatcher(
-            temp_source='Disruption',
-        )
-    )
-
-    # Cargo cult from HTML. Cluster state? Not sure how to match.
-    Degraded = IntervalClassification(
-        display_name='Degraded',
-        category=IntervalCategory.ClusterState, color=hex_to_color('#b65049')
-    )
-    Upgradeable = IntervalClassification(
-        display_name='Upgradeable',
-        category=IntervalCategory.ClusterState, color=hex_to_color('#32b8b6')
-    )
-    StatusFalse = IntervalClassification(
-        display_name='StatusFalse',
-        category=IntervalCategory.ClusterState, color=hex_to_color('#ffffff')
-    )
-    StatusUnknown = IntervalClassification(
-        display_name='StatusUnknown',
-        category=IntervalCategory.ClusterState, color=hex_to_color('#bbbbbb')
-    )
-
-    # PodLog
-    PodLogWarning = IntervalClassification(
-        display_name='PodLogWarning',
-        category=IntervalCategory.PodLog, color=hex_to_color('#fada5e'),
-        simple_series_matcher=SimpleIntervalMatcher(
-            temp_source={'PodLog', 'EtcdLog'},
-            annotations_match={
-                'severity': 'warning',
-            }
-        )
-    )
-    PodLogError = IntervalClassification(
-        display_name='PodLogError',
-        category=IntervalCategory.PodLog, color=hex_to_color('#d0312d'),
-        simple_series_matcher=SimpleIntervalMatcher(
-            temp_source={'PodLog', 'EtcdLog'},
-            annotations_match={
-                'severity': 'error',
-            }
-        )
-    )
-    PodLogInfo = IntervalClassification(
-        display_name='PodLogInfo',
-        category=IntervalCategory.PodLog, color=hex_to_color('#96cbff'),
-        simple_series_matcher=SimpleIntervalMatcher(
-            temp_source={'PodLog', 'EtcdLog'},
-            annotations_match={
-                'severity': 'info',
-            }
-        )
-    )
-    PodLogOther = IntervalClassification(
-        display_name='PodLogOther',
-        category=IntervalCategory.PodLog, color=hex_to_color('#96cbff'),
-        simple_series_matcher=SimpleIntervalMatcher(
-            temp_source={'PodLog', 'EtcdLog'},
-        )
-    )
-
-    # Enums enumerate in the order of their elements, so this
-    # is guaranteed to execute last and sweep in anything not already
-    # matched.
-    UnknownClassification = IntervalClassification(
-        display_name='Unknown',
-        category=IntervalCategory.Unclassified, color=arcade.color.GRAY,
-        series_matcher=lambda interval: True
-    )
-
-
 class IntervalAnalyzer:
 
     STRUCTURED_LOCATOR_ATTR_NAME = 'tempStructuredLocator'
@@ -641,3 +59,525 @@ class IntervalAnalyzer:
     def get_locator_key_names(cls, interval: pd.Series):
         key_names = IntervalAnalyzer.get_column_names(interval, IntervalAnalyzer.STRUCTURED_LOCATOR_KEY_PREFIX)
         return sorted(key_names, key=prioritized_sort)
+
+
+class IntervalCategory(Enum):
+    Alert = 'Alert'
+    KubeEvent = 'KubeEvent'
+    KubeletLog = 'KubeletLog'
+    NodeState = 'NodeState'
+    OperatorState = 'OperatorState'
+    Pod = 'Pod'
+    E2ETest = 'E2ETest'
+    Disruption = 'Disruption'
+    ClusterState = 'ClusterState'
+    PodLog = 'PodLog'
+
+    # Not a real category for display, but serves to classify & color when a classification
+    # is not specific to one category.
+    Any = '*'
+
+    Unclassified = 'Unclassified'
+
+
+SingleStrOrSet = Union[str, Set[str]]
+OptionalSingleStrOrSet = Optional[SingleStrOrSet]
+
+
+class SimpleIntervalMatcher:
+    """
+    Provides an easy way to specify how to classify an interval by
+    identifying values for attributes which must be set (and to what values, if desired).
+    """
+    def __init__(self, temp_source: OptionalSingleStrOrSet = None,
+                 locator_type: OptionalSingleStrOrSet = None,
+                 locator_keys_exist: Optional[Set[str]] = None,
+                 locator_keys_match: Optional[Dict[str, str]] = None,
+                 reason: OptionalSingleStrOrSet = None,
+                 cause: OptionalSingleStrOrSet = None,
+                 annotations_exist: Optional[Set[str]] = None,
+                 annotations_match: Optional[Dict[str, str]] = None,
+                 message_contains: Optional[str] = None,
+                 ):
+
+        and_exprs: List[str] = list()
+
+        def add__and_equal(column_name: str, is_in: OptionalSingleStrOrSet, column_name_prefix: Optional[str] = ''):
+            if is_in is None:
+                return
+            if isinstance(is_in, str):
+                and_exprs.append(f'`{column_name_prefix}{column_name}` == "{is_in}"')
+            else:
+                quoted = ', '.join([f'"{to_quote}"' for to_quote in is_in])
+                and_exprs.append(f'`{column_name_prefix}{column_name}`.isin([{quoted}])')
+
+        def add__and_not_null(column_names: Optional[Set[str]], column_name_prefix: Optional[str] = ''):
+            if column_names:
+                for column_name in column_names:
+                    and_exprs.append(f'(not `{column_name_prefix}{column_name}`.isnull())')
+
+        def add__and_all_equal(column_vals: Optional[Dict[str, str]], column_name_prefix: Optional[str] = ''):
+            if column_vals:
+                for column_name, val in column_vals.items():
+                    add__and_equal(column_name, val, column_name_prefix)
+
+        and_exprs.append('classification.isnull()')  # Once a classification is decided, don't recompute it
+        add__and_equal('tempSource', temp_source)
+        add__and_equal('type', locator_type, IntervalAnalyzer.STRUCTURED_LOCATOR_PREFIX)
+        add__and_not_null(locator_keys_exist, IntervalAnalyzer.STRUCTURED_LOCATOR_KEY_PREFIX)
+        add__and_all_equal(locator_keys_match, IntervalAnalyzer.STRUCTURED_LOCATOR_KEY_PREFIX)
+        add__and_equal('reason', reason, IntervalAnalyzer.STRUCTURED_MESSAGE_PREFIX)
+        add__and_equal('cause', cause, IntervalAnalyzer.STRUCTURED_MESSAGE_PREFIX)
+        add__and_not_null(annotations_exist, IntervalAnalyzer.STRUCTURED_MESSAGE_ANNOTATION_PREFIX)
+        add__and_all_equal(annotations_match, IntervalAnalyzer.STRUCTURED_MESSAGE_ANNOTATION_PREFIX)
+        if message_contains:
+            and_exprs.append(f'message.str.contains("{message_contains}")')
+
+        self.targeting_query = ' & '.join(and_exprs)
+        pass
+
+
+class IntervalClassification:
+
+    def __init__(self, display_name: str,
+                 category: IntervalCategory, color: Optional[arcade.Color] = arcade.color.GRAY,
+                 simple_interval_matcher: SimpleIntervalMatcher = None,
+                 timeline_differentiator: str = '', ):
+        self.display_name = display_name
+        self.category: IntervalCategory = category
+        self.color = color
+        self.series_matcher = simple_interval_matcher
+        # If this interval classification should cause records with the same locator
+        # to appear on different timelines, differentiate the timeline with an additional string.
+        # For example, ContainerLifecycle and ContainerReadiness
+        self.timeline_differentiator = timeline_differentiator
+
+    def apply(self, events_df: pd.DataFrame):
+        if self.series_matcher:  # If there is no matcher specified, it can't match anything.
+            events_df.loc[events_df.eval(self.series_matcher.targeting_query), ['category', 'category_str_lower', 'classification', 'classification_str_lower', 'timeline_diff']] = self.category.value, self.category.value.lower(), self, self.display_name.lower(), self.timeline_differentiator
+
+
+def hex_to_color(hex_color_code) -> arcade.Color:
+    # Remove '#' if present
+    hex_color_code = hex_color_code.lstrip('#')
+
+    # Extract RGB and optionally alpha
+    if len(hex_color_code) == 6:
+        color_tuple = tuple(int(hex_color_code[i:i+2], 16) for i in (0, 2, 4)) + (255,)  # Add alpha=255 if not provided
+    elif len(hex_color_code) == 8:
+        color_tuple = tuple(int(hex_color_code[i:i+2], 16) for i in (0, 2, 4, 6))
+    else:
+        raise ValueError("Invalid hex color code length")
+
+    return color_tuple
+
+
+class IntervalClassifications(Enum):
+
+    # KubeEvents
+    PathologicalKnown = IntervalClassification(
+        display_name='PathologicalKnown',
+        category=IntervalCategory.KubeEvent,
+        color=hex_to_color('#0000ff'),
+        simple_interval_matcher=SimpleIntervalMatcher(
+            temp_source='KubeEvent',
+            annotations_match={
+                'interesting': 'true',
+                'pathological': 'true',
+            }
+        )
+    )
+
+    InterestingEvent = IntervalClassification(
+        display_name='InterestingEvent',
+        category=IntervalCategory.KubeEvent,
+        color=hex_to_color('#6E6E6E'),
+        simple_interval_matcher=SimpleIntervalMatcher(
+            temp_source='KubeEvent',
+            annotations_match={
+                'interesting': 'true'
+            }
+        )
+    )
+    PathologicalNew = IntervalClassification(
+        # PathologicalKnown will capture if interesting=true. New will fall through
+        # and be captured here.
+        display_name='PathologicalNew',
+        category=IntervalCategory.KubeEvent,
+        color=hex_to_color('#d0312d'),
+        simple_interval_matcher=SimpleIntervalMatcher(
+            temp_source='KubeEvent',
+            annotations_match={
+                'pathological': 'true',
+            }
+        )
+    )
+
+    # Alerts
+    AlertPending = IntervalClassification(
+        display_name='AlertPending',
+        category=IntervalCategory.Alert, color=hex_to_color('#fada5e'),
+        simple_interval_matcher=SimpleIntervalMatcher(
+            temp_source='Alert',
+            annotations_match={
+                'alertstate': 'pending',
+            }
+        )
+    )
+    AlertInfo = IntervalClassification(
+        display_name='AlertInfo',
+        category=IntervalCategory.Alert, color=hex_to_color('#fada5e'),
+        simple_interval_matcher=SimpleIntervalMatcher(
+            temp_source='Alert',
+            annotations_match={
+                'severity': 'info',
+            }
+        )
+    )
+    AlertWarning = IntervalClassification(
+        display_name='AlertWarning',
+        category=IntervalCategory.Alert, color=hex_to_color('#ffa500'),
+        simple_interval_matcher=SimpleIntervalMatcher(
+            temp_source='Alert',
+            annotations_match={
+                'severity': 'warning',
+            }
+        )
+    )
+    AlertCritical = IntervalClassification(
+        display_name='AlertCritical',
+        category=IntervalCategory.Alert, color=hex_to_color('#d0312d'),
+        simple_interval_matcher=SimpleIntervalMatcher(
+            temp_source='Alert',
+            annotations_match={
+                'severity': 'critical',
+            }
+        )
+    )
+
+    # Operator
+    OperatorUnavailable = IntervalClassification(
+        display_name='OperatorUnavailable',
+        category=IntervalCategory.OperatorState, color=hex_to_color('#d0312d'),
+        simple_interval_matcher=SimpleIntervalMatcher(
+            temp_source='OperatorState',
+            annotations_match={
+                'condition': 'Available',
+                'status': 'false',
+            }
+        )
+    )
+    OperatorDegraded = IntervalClassification(
+        display_name='OperatorDegraded',
+        category=IntervalCategory.OperatorState, color=hex_to_color('#ffa500'),
+        simple_interval_matcher=SimpleIntervalMatcher(
+            temp_source='OperatorState',
+            annotations_match={
+                'condition': 'Degraded',
+                'status': 'true',
+            }
+        )
+    )
+    OperatorProgressing = IntervalClassification(
+        display_name='OperatorProgressing',
+        category=IntervalCategory.OperatorState, color=hex_to_color('#fada5e'),
+        simple_interval_matcher=SimpleIntervalMatcher(
+            temp_source='OperatorState',
+            annotations_match={
+                'condition': 'Progressing',
+                'status': 'true',
+            }
+        )
+    )
+
+    # Node
+    NodeDrain = IntervalClassification(
+        display_name='NodeDrain',
+        category=IntervalCategory.NodeState, color=hex_to_color('#4294e6'),
+        simple_interval_matcher=SimpleIntervalMatcher(
+            locator_type='Node',
+            annotations_match={
+                'phase': 'Drain',
+            }
+        )
+    )
+    NodeReboot = IntervalClassification(
+        display_name='NodeReboot',
+        category=IntervalCategory.NodeState, color=hex_to_color('#6aaef2'),
+        simple_interval_matcher=SimpleIntervalMatcher(
+            locator_type='Node',
+            annotations_match={
+                'phase': 'Reboot',
+            }
+        )
+    )
+    NodeOperatingSystemUpdate = IntervalClassification(
+        display_name='NodeOperatingSystemUpdate',
+        category=IntervalCategory.NodeState, color=hex_to_color('#96cbff'),
+        simple_interval_matcher=SimpleIntervalMatcher(
+            locator_type='Node',
+            annotations_match={
+                'phase': 'OperatingSystemUpdate',
+            }
+        )
+    )
+    NodeUpdate = IntervalClassification(
+        display_name='NodeUpdate',
+        category=IntervalCategory.NodeState, color=hex_to_color('#1e7bd9'),
+        simple_interval_matcher=SimpleIntervalMatcher(
+            locator_type='Node',
+            annotations_match={
+                'reason': 'NodeUpdate',
+            }
+        )
+    )
+    NodeNotReady = IntervalClassification(
+        display_name='NodeNotReady',
+        category=IntervalCategory.NodeState, color=hex_to_color('#fada5e'),
+        simple_interval_matcher=SimpleIntervalMatcher(
+            locator_type='Node',
+            annotations_match={
+                'reason': 'NotReady',
+            }
+        )
+    )
+
+    # Tests
+    TestPassed = IntervalClassification(
+        display_name='TestPassed',
+        category=IntervalCategory.E2ETest, color=hex_to_color('#3cb043'),
+        simple_interval_matcher=SimpleIntervalMatcher(
+            temp_source='E2ETest',
+            annotations_match={
+                'status': 'Passed',
+            }
+        )
+    )
+    TestSkipped = IntervalClassification(
+        display_name='TestSkipped',
+        category=IntervalCategory.E2ETest, color=hex_to_color('#ceba76'),
+        simple_interval_matcher=SimpleIntervalMatcher(
+            temp_source='E2ETest',
+            annotations_match={
+                'status': 'Skipped',
+            }
+        )
+    )
+    TestFlaked = IntervalClassification(
+        display_name='TestFlaked',
+        category=IntervalCategory.E2ETest, color=hex_to_color('#ffa500'),
+        simple_interval_matcher=SimpleIntervalMatcher(
+            temp_source='E2ETest',
+            annotations_match={
+                'status': 'Flaked',
+            }
+        )
+    )
+    TestFailed = IntervalClassification(
+        display_name='TestFailed',
+        category=IntervalCategory.E2ETest, color=hex_to_color('#d0312d'),
+        simple_interval_matcher=SimpleIntervalMatcher(
+            temp_source='E2ETest',
+            annotations_match={
+                'status': 'Failed',
+            }
+        )
+    )
+
+    # Pods
+    PodCreated = IntervalClassification(
+        display_name='PodCreated',
+        category=IntervalCategory.Pod, color=hex_to_color('#96cbff'),
+        simple_interval_matcher=SimpleIntervalMatcher(
+            temp_source='PodState',
+            annotations_match={
+                'reason': 'Created',
+            }
+        )
+    )
+    PodScheduled = IntervalClassification(
+        display_name='PodScheduled',
+        category=IntervalCategory.Pod, color=hex_to_color('#1e7bd9'),
+        simple_interval_matcher=SimpleIntervalMatcher(
+            temp_source='PodState',
+            annotations_match={
+                'reason': 'Scheduled',
+            }
+        )
+    )
+    PodTerminating = IntervalClassification(
+        display_name='PodTerminating',
+        category=IntervalCategory.Pod, color=hex_to_color('#ffa500'),
+        simple_interval_matcher=SimpleIntervalMatcher(
+            temp_source='PodState',
+            annotations_match={
+                'reason': 'GracefulDelete',
+            }
+        )
+    )
+    ContainerWait = IntervalClassification(
+        display_name='ContainerWait',
+        category=IntervalCategory.Pod, color=hex_to_color('#ca8dfd'),
+        simple_interval_matcher=SimpleIntervalMatcher(
+            temp_source='PodState',
+            locator_keys_exist={'container'},
+            annotations_match={
+                'reason': 'ContainerWait',
+            }
+        ),
+        timeline_differentiator='container-lifecycle'
+    )
+    ContainerStart = IntervalClassification(
+        display_name='ContainerStart',
+        category=IntervalCategory.Pod, color=hex_to_color('#9300ff'),
+        simple_interval_matcher=SimpleIntervalMatcher(
+            temp_source='PodState',
+            locator_keys_exist={'container'},
+            annotations_match={
+                'reason': 'ContainerStart',
+            }
+        ),
+        timeline_differentiator='container-lifecycle'
+    )
+    ContainerNotReady = IntervalClassification(
+        display_name='ContainerNotReady',
+        category=IntervalCategory.Pod, color=hex_to_color('#fada5e'),
+        simple_interval_matcher=SimpleIntervalMatcher(
+            temp_source='PodState',
+            locator_keys_exist={'container'},
+            annotations_match={
+                'reason': 'NotReady',
+            }
+        ),
+        timeline_differentiator='container-readiness'
+    )
+    ContainerReady = IntervalClassification(
+        display_name='ContainerReady',
+        category=IntervalCategory.Pod, color=hex_to_color('#3cb043'),
+        simple_interval_matcher=SimpleIntervalMatcher(
+            temp_source='PodState',
+            locator_keys_exist={'container'},
+            annotations_match={
+                'reason': 'Ready',
+            }
+        ),
+        timeline_differentiator='container-readiness'
+    )
+    ContainerReadinessFailed = IntervalClassification(
+        display_name='ContainerReadinessFailed',
+        category=IntervalCategory.Pod, color=hex_to_color('#d0312d'),
+        simple_interval_matcher=SimpleIntervalMatcher(
+            temp_source='PodState',
+            locator_keys_exist={'container'},
+            annotations_match={
+                'reason': 'ReadinessFailed',
+            }
+        ),
+        timeline_differentiator='container-readiness'
+    )
+    ContainerReadinessErrored = IntervalClassification(
+        display_name='ContainerReadinessErrored',
+        category=IntervalCategory.Pod, color=hex_to_color('#d0312d'),
+        simple_interval_matcher=SimpleIntervalMatcher(
+            temp_source='PodState',
+            locator_keys_exist={'container'},
+            annotations_match={
+                'reason': 'ReadinessErrored',
+            }
+        ),
+        timeline_differentiator='container-readiness'
+    )
+    StartupProbeFailed = IntervalClassification(
+        display_name='StartupProbeFailed',
+        category=IntervalCategory.Pod, color=hex_to_color('#c90076'),
+        simple_interval_matcher=SimpleIntervalMatcher(
+            temp_source='PodState',
+            annotations_match={
+                'reason': 'StartupProbeFailed',
+            }
+        ),
+        timeline_differentiator='container-readiness'
+    )
+
+    # Disruption
+    CIClusterDisruption = IntervalClassification(
+        display_name='CIClusterDisruption',
+        category=IntervalCategory.Disruption, color=hex_to_color('#96cbff'),
+        simple_interval_matcher=SimpleIntervalMatcher(
+            temp_source='Disruption',
+            message_contains='likely a problem in cluster running tests',
+        )
+    )
+    Disruption = IntervalClassification(
+        display_name='Disruption',
+        category=IntervalCategory.Disruption, color=hex_to_color('#d0312d'),
+        simple_interval_matcher=SimpleIntervalMatcher(
+            temp_source='Disruption',
+        )
+    )
+
+    # Cargo cult from HTML. Cluster state? Not sure how to match.
+    Degraded = IntervalClassification(
+        display_name='Degraded',
+        category=IntervalCategory.ClusterState, color=hex_to_color('#b65049')
+    )
+    Upgradeable = IntervalClassification(
+        display_name='Upgradeable',
+        category=IntervalCategory.ClusterState, color=hex_to_color('#32b8b6')
+    )
+    StatusFalse = IntervalClassification(
+        display_name='StatusFalse',
+        category=IntervalCategory.ClusterState, color=hex_to_color('#ffffff')
+    )
+    StatusUnknown = IntervalClassification(
+        display_name='StatusUnknown',
+        category=IntervalCategory.ClusterState, color=hex_to_color('#bbbbbb')
+    )
+
+    # PodLog
+    PodLogWarning = IntervalClassification(
+        display_name='PodLogWarning',
+        category=IntervalCategory.PodLog, color=hex_to_color('#fada5e'),
+        simple_interval_matcher=SimpleIntervalMatcher(
+            temp_source={'PodLog', 'EtcdLog'},
+            annotations_match={
+                'severity': 'warning',
+            }
+        )
+    )
+    PodLogError = IntervalClassification(
+        display_name='PodLogError',
+        category=IntervalCategory.PodLog, color=hex_to_color('#d0312d'),
+        simple_interval_matcher=SimpleIntervalMatcher(
+            temp_source={'PodLog', 'EtcdLog'},
+            annotations_match={
+                'severity': 'error',
+            }
+        )
+    )
+    PodLogInfo = IntervalClassification(
+        display_name='PodLogInfo',
+        category=IntervalCategory.PodLog, color=hex_to_color('#96cbff'),
+        simple_interval_matcher=SimpleIntervalMatcher(
+            temp_source={'PodLog', 'EtcdLog'},
+            annotations_match={
+                'severity': 'info',
+            }
+        )
+    )
+    PodLogOther = IntervalClassification(
+        display_name='PodLogOther',
+        category=IntervalCategory.PodLog, color=hex_to_color('#96cbff'),
+        simple_interval_matcher=SimpleIntervalMatcher(
+            temp_source={'PodLog', 'EtcdLog'},
+        )
+    )
+
+    # Enums enumerate in the order of their elements, so this
+    # is guaranteed to execute last and sweep in anything not already
+    # matched.
+    UnknownClassification = IntervalClassification(
+        display_name='Unknown',
+        category=IntervalCategory.Unclassified, color=arcade.color.GRAY,
+        simple_interval_matcher=SimpleIntervalMatcher(),  # Match everything that is not already classified
+    )

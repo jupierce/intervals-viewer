@@ -20,7 +20,7 @@ class FilteringField:
         if column_name is None:
             autoname = display_name.lower()
             if autoname in ('category', 'classification'):
-                self.column_name = f'{autoname}_str'
+                self.column_name = f'{autoname}_str_lower'
             elif autoname == 'message':
                 self.column_name = f'{IntervalAnalyzer.STRUCTURED_MESSAGE_PREFIX}humanMessage'
             else:

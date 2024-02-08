@@ -535,7 +535,7 @@ class IntervalsTimeline:
                                                end_x=interval_line_end_x,
                                                end_y=self.timeline_row_height//2,
                                                line_width=self.timeline_row_height-1,  # Subtraction will leave some spacing between rows
-                                               color=interval_row['color'])
+                                               color=interval_row['classification'].color)
             self.shape_element_list.append(interval_line)
             # Setup information to draw directly into the PIL image buffer
 
@@ -588,7 +588,7 @@ class IntervalsTimeline:
                 end_x=self.last_set_left + end_x,
                 end_y=self.last_set_bottom + self.timeline_row_height / 2 + 2,
                 line_width=self.timeline_row_height + 2,
-                color=self.interval_under_mouse['color']
+                color=self.interval_under_mouse['classification'].color
             )
 
         mouse_x, mouse_y = self.ei.last_known_mouse_location

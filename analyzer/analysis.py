@@ -72,21 +72,15 @@ class EventsInspector:
         self.last_filter_query: Optional[str] = None
 
     def add_interval_data(self, intervals: Iterable[Dict]):
-        import cProfile, pstats, io
-        from pstats import SortKey
-        pr = cProfile.Profile()
-        pr.enable()
-        for interval_dict in intervals:
-            # Classify an interval. The classification implies category and color for later decoration of the interval row.
-            enhance_interval_data_with_classification(interval_dict)
-        pr.disable()
-        s = io.StringIO()
-        sortby = SortKey.CUMULATIVE
-        ps = pstats.Stats(pr, stream=s).sort_stats(sortby)
-        ps.print_stats()
-        print(s.getvalue())
-
         new_events = pd.DataFrame.from_dict(pd.json_normalize(intervals), orient='columns')
+        new_events['classification'] = None  # Initialize classification to null for all rows
+
+        # Provide each classification an opportunity to choose the rows it represents. IntervalClassifications
+        # will enumerate in order, and the first classification to claim a row will keep it.
+        for classifier in IntervalClassifications:
+            classifier.value.apply(new_events)
+
+        new_events = new_events.assign(timeline_id=lambda row: row['locator'] + '-' + row['timeline_diff'])
 
         # Set 'to' equal to 'from' where 'to' is null
         new_events.loc[new_events['to'].isnull(), 'to'] = new_events['from']

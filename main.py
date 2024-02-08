@@ -48,7 +48,7 @@ class MessageSection(arcade.Section):
             left=Layout.MESSAGE_SECTION_LEFT,
             right=window_width - Layout.MESSAGE_SECTION_RIGHT_OFFSET,
             bottom=Layout.MESSAGE_SECTION_BOTTOM,
-            top=Layout.MESSAGE_SECTION_BOTTOM + Layout.MESSAGE_SECTION_HEIGHT
+            top=Layout.MESSAGE_SECTION_TOP
         )
         self.long_text.width = self.background.width - 5
         self.long_text.y = self.background.top - 14
@@ -657,13 +657,12 @@ class IntervalsTimeline:
         return self.first_interval_row['timeline_id']
 
 
-class ZoomScrollBar(SimpleRect):
+class VerticalScrollBar(SimpleRect):
 
-    def __init__(self, graph_section: arcade.Section):
+    def __init__(self, window: arcade.Window):
         super().__init__(color=arcade.color.LIGHT_GRAY)
-        self.graph_section = graph_section
         self.scroll_percent = 0.0
-        self.window = self.graph_section.window
+        self.window = window
         self.current_scrolled_y_rows = 0
         self.current_rows_per_page = 0
         self.scrollable_row_count = 1
@@ -676,10 +675,10 @@ class ZoomScrollBar(SimpleRect):
 
     def on_resize(self):
         self.position(
-            right=self.window.width - Layout.ZOOM_SCROLL_BAR_RIGHT_OFFSET,
-            width=Layout.ZOOM_SCROLL_BAR_WIDTH,
-            bottom=Layout.ZOOM_SCROLL_BAR_BOTTOM,
-            top=self.window.height - Layout.ZOOM_SCROLL_BAR_TOP_OFFSET
+            right=self.window.width - Layout.VERTICAL_SCROLL_BAR_RIGHT_OFFSET,
+            width=Layout.VERTICAL_SCROLL_BAR_WIDTH,
+            bottom=Layout.VERTICAL_SCROLL_BAR_BOTTOM,
+            top=self.window.height - Layout.VERTICAL_SCROLL_BAR_TOP_OFFSET
         )
 
     def draw(self):
@@ -696,6 +695,53 @@ class ZoomScrollBar(SimpleRect):
                 bottom=self.top - handle_y_offset - handle_height_px,
                 color=arcade.color.DARK_GRAY
             )
+
+
+class HorizontalScrollBar(SimpleRect):
+
+    def __init__(self, window: arcade.Window, ei: EventsInspector):
+        super().__init__(color=arcade.color.LIGHT_GRAY)
+        self.background_clearer = SimpleRect(arcade.color.BLACK)
+        self.ei = ei
+        self.window = window
+        self.width_percentage = 100.0
+        self.left_offset_percentage = 0.0
+        self.on_scrolling_change()
+        self.on_resize()
+
+    def on_scrolling_change(self):
+        timedelta_displayed = self.ei.zoom_timeline_stop - self.ei.zoom_timeline_start
+        timedelta_possible = self.ei.absolute_timeline_stop - self.ei.absolute_timeline_start
+        self.width_percentage = (timedelta_displayed.total_seconds() / timedelta_possible.total_seconds())
+        self.left_offset_percentage = (self.ei.zoom_timeline_stop - self.ei.absolute_timeline_start).total_seconds() / timedelta_possible.total_seconds()
+
+    def on_resize(self):
+        self.position(
+            right=self.window.width - Layout.HORIZONTAL_SCROLL_BAR_RIGHT_OFFSET,
+            left=Layout.HORIZONTAL_SCROLL_BAR_LEFT,
+            bottom=Layout.HORIZONTAL_SCROLL_BAR_BOTTOM,
+            top=Layout.HORIZONTAL_SCROLL_BAR_TOP
+        )
+        self.background_clearer.position(
+            left=0,
+            right=self.window.width,
+            bottom=Layout.HORIZONTAL_SCROLL_BAR_BOTTOM,
+            top=Layout.HORIZONTAL_SCROLL_BAR_TOP
+        )
+
+    def draw(self):
+        self.background_clearer.draw()
+        super().draw()
+        handle_width = int(self.width_percentage * self.width)
+        unoccupied_width = self.width - handle_width
+        left_offset = int(unoccupied_width * self.left_offset_percentage)
+        arcade.draw_lrtb_rectangle_filled(
+            left=Layout.HORIZONTAL_SCROLL_BAR_LEFT + left_offset,
+            right=Layout.HORIZONTAL_SCROLL_BAR_LEFT + left_offset + handle_width,
+            top=Layout.HORIZONTAL_SCROLL_BAR_TOP,
+            bottom=Layout.HORIZONTAL_SCROLL_BAR_BOTTOM,
+            color=arcade.color.DARK_GRAY
+        )
 
 
 class CategoryBar(SimpleRect):
@@ -809,7 +855,8 @@ class GraphSection(arcade.Section):
         self.color_legend_bar = ColorLegendBar(self, ei)
         self.zoom_date_range_display_bar = ZoomDateRangeDisplayBar(self, ei)
         self.category_bar = CategoryBar(self, ei)
-        self.zoom_scroll_bar = ZoomScrollBar(self)
+        self.vertical_scroll_bar = VerticalScrollBar(self.window)
+        self.horizontal_scroll_bar = HorizontalScrollBar(self.window, ei)
 
         # When rows are drawn, this reference will be set to the top most
         # interval timeline (the first row). This is useful to inform
@@ -878,14 +925,15 @@ class GraphSection(arcade.Section):
             val = 0
 
         self._scroll_y_rows = val
-        self.resize_scroll_bar()
+        self.update_scroll_bars()
 
-    def resize_scroll_bar(self):
-        self.zoom_scroll_bar.on_scrolling_change(
+    def update_scroll_bars(self):
+        self.vertical_scroll_bar.on_scrolling_change(
             current_scrolled_y_rows=self.scroll_y_rows,
             current_rows_per_page=self.calc_rows_to_display(),
             available_row_count=len(self.ei.grouped_intervals.groups.keys())
         )
+        self.horizontal_scroll_bar.on_scrolling_change()
 
     def scroll_down_by_rows(self, count: int):
         self.scroll_y_rows += count
@@ -923,6 +971,8 @@ class GraphSection(arcade.Section):
             self.scroll_y_rows = target_for_scroll
         else:
             self.scroll_down_by_rows(-1)
+
+        self.update_scroll_bars()
 
     def process_keys_down(self, delay_until_next: Optional[float] = None):
         """
@@ -982,11 +1032,11 @@ class GraphSection(arcade.Section):
 
         if arcade.key.NUM_ADD in self.keys_down or arcade.key.EQUAL in self.keys_down:  # non-numpad "+" is shift+= ; ignore if shift is not being held down
             self.row_height_px = min(self.row_height_px + 2, self.height // 4)
-            self.resize_scroll_bar()
+            self.update_scroll_bars()
 
         if arcade.key.NUM_SUBTRACT in self.keys_down or arcade.key.MINUS in self.keys_down:
             self.row_height_px = max(self.row_height_px - 2, 2)
-            self.resize_scroll_bar()
+            self.update_scroll_bars()
 
         if delay_until_next is None:
             self.time_until_next_process_keys_down = GraphSection.PERIOD_BETWEEN_REACTION_TO_KEY_DOWN
@@ -1005,8 +1055,9 @@ class GraphSection(arcade.Section):
         self.color_legend_bar.on_resize()
         self.zoom_date_range_display_bar.on_resize()
         self.category_bar.on_resize()
-        self.zoom_scroll_bar.on_resize()
-        self.resize_scroll_bar()  # Trigger a scroll bar handle re-calculation
+        self.vertical_scroll_bar.on_resize()
+        self.horizontal_scroll_bar.on_resize()
+        self.update_scroll_bars()  # Trigger a scroll bar handle re-calculation
 
     def calc_rows_to_display(self) -> int:
         """
@@ -1112,8 +1163,8 @@ class GraphSection(arcade.Section):
                              color=Theme.COLOR_CROSS_HAIR_LINES,
                              line_width=1)
 
-        self.zoom_scroll_bar.draw()
-
+        self.vertical_scroll_bar.draw()
+        self.horizontal_scroll_bar.draw()
         self.category_bar.draw_categories(category_label_row_count, row_height_px=self.row_height_px)
 
     def on_mouse_leave(self, x: int, y: int):
@@ -1133,7 +1184,7 @@ class GraphSection(arcade.Section):
         self.mouse_button_down[button] = (x, y, modifiers)
 
     def location_within_timeline_area(self, x: int, y: int) -> bool:
-        if x >= self.category_bar.right and x < self.zoom_scroll_bar.left and y <= self.zoom_date_range_display_bar.bottom and y > self.category_bar.bottom:
+        if x >= self.category_bar.right and x < self.vertical_scroll_bar.left and y <= self.zoom_date_range_display_bar.bottom and y > self.category_bar.bottom:
             return True
         else:
             return False
@@ -1207,7 +1258,7 @@ class GraphInterfaceView(arcade.View):
         self.detail_section.width = window_width
 
     def on_resize(self, window_width: int, window_height: int):
-        self.ei.on_zoom_resize(window_width - Layout.ZOOM_SCROLL_BAR_WIDTH - Layout.CATEGORY_BAR_WIDTH)
+        self.ei.on_zoom_resize(window_width - Layout.VERTICAL_SCROLL_BAR_WIDTH - Layout.CATEGORY_BAR_WIDTH)
         self.adjust_section_positions(window_width, window_height)
         self.message_section.on_resize(window_width, window_height)
         self.graph_section.on_resize(window_width, window_height)

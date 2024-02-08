@@ -1217,16 +1217,15 @@ class MainWindow(arcade.Window):
     def __init__(self, width, height, title):
         super().__init__(width, height, title, resizable=True)
         arcade.set_background_color(arcade.color.WHITE)
-        self.ei: Optional[EventsInspector] = None
+        self.ei = EventsInspector()
         self.import_timeline_view = ImportTimelineView(self, load_data=lambda stream: self.on_data_load(stream))
         self.graph_view: Optional[GraphInterfaceView] = None
         self.filter_view: Optional[FilteringView] = None
         self.show_view(self.import_timeline_view)
 
     def on_data_load(self, stream_handle):
-        events_dict = json.load(stream_handle)['items']
-        events = pd.DataFrame.from_dict(pd.json_normalize(events_dict), orient='columns')
-        self.ei = EventsInspector(events)
+        intervals_list = json.load(stream_handle)['items']
+        self.ei.add_interval_data(intervals_list)
         self.graph_view = GraphInterfaceView(self.ei, self)
         self.filter_view = FilteringView(self.ei, self, on_exit=lambda: self.show_view(self.graph_view))
         self.show_view(self.graph_view)

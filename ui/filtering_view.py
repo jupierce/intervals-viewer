@@ -326,7 +326,7 @@ Complex Expression (do not mix with Simple):
         full_query_string = self.or_fields_set.get_query_string()
         print(f'Updating query: {full_query_string}')
         try:
-            self.ei.set_query(full_query_string)
+            self.ei.set_filter_query(full_query_string)
             self.on_exit()
         except:
             # Syntax issue in query

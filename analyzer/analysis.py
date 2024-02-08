@@ -4,15 +4,10 @@ import pandas as pd
 import traceback
 from pandas.core.groupby import DataFrameGroupBy
 from datetime import datetime, timedelta
-from typing import Optional, Tuple, Union, List
+from typing import Optional, Tuple, Union, List, Dict, Iterable
 from .intervals import IntervalClassification, IntervalClassifications, IntervalCategory
 
 NANOSECONDS_PER_SECOND = 1000000000
-
-
-def get_interval_category(row: pd.Series) -> pd.Series:
-    classification: IntervalClassification = row['classification']
-    return pd.Series([classification.category.value, classification.category.value.lower()])
 
 
 def seconds_between(pd_datetime_from, pd_datatime_to) -> float:
@@ -27,19 +22,14 @@ def get_interval_duration(row: pd.Series):
     return seconds_between(row['from'], row['to'])
 
 
-def get_interval_classification(interval: pd.Series) -> pd.Series:
-    # by default, the records associated with a timeline share a locator, but we can decorate this in some cases
-
-    def series(classification: IntervalClassification) -> pd.Series:
-        timeline_id = classification.get_timeline_id(interval)
-        return pd.Series([timeline_id, classification, classification.display_name.lower()])
-
-    classifications: List[IntervalClassification] = [e.value for e in IntervalClassifications]
-    for classification in classifications:
-        if classification.matches(interval):
-            return series(classification)
-
-    return series(IntervalClassifications.UnknownClassification.value)
+def enhance_interval_data_with_classification(interval_dict: Dict):
+    """
+    Given an interval entry from JSON, decorate it with additional metadata for grouping/indexing/etc.
+    """
+    for classification in IntervalClassifications:
+        if classification.value.matches(interval_dict):
+            classification.value.decorate_interval(interval_dict)
+            break
 
 
 def get_interval_color(row: pd.Series) -> Union[arcade.Color, Tuple[int, int, int, int]]:
@@ -56,46 +46,16 @@ class Details:
 
 class EventsInspector:
 
-    def __init__(self, events_df: pd.DataFrame):
-        self.events_df = events_df
+    def __init__(self):
+        self.events_df = pd.DataFrame()
         self.last_known_mouse_location: Tuple[int, int] = (0, 0)
 
-        # Set 'to' equal to 'from' where 'to' is null
-        self.events_df.loc[self.events_df['to'].isnull(), 'to'] = self.events_df['from']
-        # Ensure the 'to' and 'from' columns are parsed as datetime
-        self.events_df['to'] = pd.to_datetime(self.events_df['to'], format="%Y-%m-%dT%H:%M:%SZ")
-        self.events_df['from'] = pd.to_datetime(self.events_df['from'], format="%Y-%m-%dT%H:%M:%SZ")
-
-        # Filter out intervals that are not important to render
-        self.events_df = self.events_df[self.events_df['tempStructuredMessage.reason'] != 'DisruptionEnded']
-        # self.events_df = self.events_df[-((self.events_df['tempSource'] == 'E2ETest') & ((self.events_df['tempStructuredMessage.annotations.status'] == 'Passed') | (self.events_df['tempStructuredMessage.annotations.status'] == 'Skipped')))]  # Notice the '-', which inverts the criteria
-        # self.events_df = self.events_df[-(self.events_df['tempStructuredMessage.annotations.interesting'] == 'false')]  # Notice the '-', which inverts the criteria
-
-        # Classify an interval. The classification implies category and color for later decoration of the interval row.
-        self.events_df[['timeline_id', 'classification', 'classification_str']] = self.events_df.apply(get_interval_classification, axis=1)
-
-        # Create a new row called category that will be used as the first grouping level for the
-        # data. In the graph area, category for each timeline is shown on the left.
-        self.events_df[['category', 'category_str']] = self.events_df.apply(get_interval_category, axis=1)
-        # Populate the color the interval should be rendered with.
-        self.events_df['color'] = self.events_df.apply(get_interval_color, axis=1)
-
-        # Pre-calculate the duration, in seconds, of all intervals
-        self.events_df['duration'] = self.events_df.apply(get_interval_duration, axis=1)
-
-        self.absolute_timeline_start: pd.Timestamp = (events_df['from'].min()).floor('min')  # Get the earliest interval start and round down to nearest minute
-        self.absolute_timeline_stop: pd.Timestamp = (events_df['to'].max()).ceil('min')
-
-        # Order rows by category, locator, then make sure all rows are in chronological order
-        self.events_df = self.events_df.sort_values(['category', 'timeline_id', 'from'], ascending=True)
-
-        self.total_timeline_ns = int((self.absolute_timeline_start - self.absolute_timeline_start).to_timedelta64())
-
+        # No data yet, so setup arbitrary start and stop for absolute timeline extents
+        self.absolute_timeline_start: pd.Timestamp = pd.Timestamp.now()
+        self.absolute_timeline_stop: pd.Timestamp = pd.Timestamp.now() + timedelta(minutes=60)
         self.zoom_timeline_start: pd.Timestamp = self.absolute_timeline_start
         self.zoom_timeline_stop: pd.Timestamp = self.absolute_timeline_stop
-
         self.selected_rows = self.events_df
-        self.visible_groups_by_category = self.events_df.groupby(['category'])
 
         # The number of horizontal pixels available to draw each timeline row
         self.current_timeline_width = 0
@@ -109,6 +69,53 @@ class EventsInspector:
         self.grouped_intervals: Optional[DataFrameGroupBy] = None
 
         self.details: Details = Details(self)
+        self.last_filter_query: Optional[str] = None
+
+    def add_interval_data(self, intervals: Iterable[Dict]):
+        import cProfile, pstats, io
+        from pstats import SortKey
+        pr = cProfile.Profile()
+        pr.enable()
+        for interval_dict in intervals:
+            # Classify an interval. The classification implies category and color for later decoration of the interval row.
+            enhance_interval_data_with_classification(interval_dict)
+        pr.disable()
+        s = io.StringIO()
+        sortby = SortKey.CUMULATIVE
+        ps = pstats.Stats(pr, stream=s).sort_stats(sortby)
+        ps.print_stats()
+        print(s.getvalue())
+
+        new_events = pd.DataFrame.from_dict(pd.json_normalize(intervals), orient='columns')
+
+        # Set 'to' equal to 'from' where 'to' is null
+        new_events.loc[new_events['to'].isnull(), 'to'] = new_events['from']
+        # Ensure the 'to' and 'from' columns are parsed as datetime
+        new_events['to'] = pd.to_datetime(new_events['to'], format="%Y-%m-%dT%H:%M:%SZ")
+        new_events['from'] = pd.to_datetime(new_events['from'], format="%Y-%m-%dT%H:%M:%SZ")
+
+        # Filter out intervals that are not important to render
+        new_events = new_events[new_events['tempStructuredMessage.reason'] != 'DisruptionEnded']
+        # self.events_df = self.events_df[-((self.events_df['tempSource'] == 'E2ETest') & ((self.events_df['tempStructuredMessage.annotations.status'] == 'Passed') | (self.events_df['tempStructuredMessage.annotations.status'] == 'Skipped')))]  # Notice the '-', which inverts the criteria
+        # self.events_df = self.events_df[-(self.events_df['tempStructuredMessage.annotations.interesting'] == 'false')]  # Notice the '-', which inverts the criteria
+
+        # Pre-calculate the duration, in seconds, of all intervals
+        new_events['duration'] = new_events.apply(get_interval_duration, axis=1)
+
+        self.events_df = pd.concat([self.events_df, new_events], ignore_index=True, sort=False)
+
+        # Reassess the data for max/min
+        self.absolute_timeline_start: pd.Timestamp = (self.events_df['from'].min()).floor('min')  # Get the earliest interval start and round down to nearest minute
+        self.absolute_timeline_stop: pd.Timestamp = (self.events_df['to'].max()).ceil('min')
+
+        # Order rows by category, timeline, then make sure all rows are in chronological order by start time
+        self.events_df = self.events_df.sort_values(['category', 'timeline_id', 'from'], ascending=True)
+
+        self.zoom_timeline_start: pd.Timestamp = self.absolute_timeline_start
+        self.zoom_timeline_stop: pd.Timestamp = self.absolute_timeline_stop
+        self.selected_rows = self.events_df
+
+        self.set_filter_query(self.last_filter_query)  # Re-apply the filter to apply to combined data
         self.notify_of_timeline_date_range_change()
 
     def notify_of_timeline_date_range_change(self):
@@ -119,7 +126,7 @@ class EventsInspector:
         filtered_df = df[(df['to'] >= self.zoom_timeline_start) & (df['from'] <= self.zoom_timeline_stop)]
         self.grouped_intervals = filtered_df.groupby(['category', 'timeline_id'])
 
-    def set_query(self, query: Optional[str] = None):
+    def set_filter_query(self, query: Optional[str] = None):
         if query:
             try:
                 self.selected_rows = self.events_df.query(query)
@@ -128,6 +135,7 @@ class EventsInspector:
                 raise
         else:
             self.selected_rows = self.events_df
+        self.last_filter_query = query
         self.notify_of_timeline_date_range_change()
 
     def on_zoom_resize(self, timeline_width):

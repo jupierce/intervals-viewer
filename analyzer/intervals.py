@@ -24,7 +24,8 @@ class IntervalCategory(Enum):
     Unclassified = 'Unclassified'
 
 
-SingleStrOrSet = Optional[Union[str, Set[str]]]
+SingleStrOrSet = Union[str, Set[str]]
+OptionalSingleStrOrSet = Optional[SingleStrOrSet]
 
 
 class SimpleIntervalMatcher:
@@ -32,12 +33,12 @@ class SimpleIntervalMatcher:
     Provides an easy way to specify how to classify an interval by
     identifying values for attributes which must be set (and to what values, if desired).
     """
-    def __init__(self, temp_source: SingleStrOrSet = None,
-                 locator_type: SingleStrOrSet = None,
+    def __init__(self, temp_source: OptionalSingleStrOrSet = None,
+                 locator_type: OptionalSingleStrOrSet = None,
                  locator_keys_exist: Optional[Set[str]] = None,
                  locator_keys_match: Optional[Dict[str, str]] = None,
-                 reason: SingleStrOrSet = None,
-                 cause: SingleStrOrSet = None,
+                 reason: OptionalSingleStrOrSet = None,
+                 cause: OptionalSingleStrOrSet = None,
                  annotations_exist: Optional[Set[str]] = None,
                  annotations_match: Optional[Dict[str, str]] = None,
                  message_contains: Optional[str] = None,
@@ -52,37 +53,52 @@ class SimpleIntervalMatcher:
         self.annotations_match: Optional[Dict[str, str]] = annotations_match
         self.message_contains: Optional[str] = message_contains
 
-    def matches(self, interval: pd.Series) -> bool:
+    def matches(self, interval_dict: Dict) -> bool:
 
-        def matches_any(actual_value, options: SingleStrOrSet):
+        def matches_any(actual_value, options: OptionalSingleStrOrSet):
             if isinstance(options, str):
                 return actual_value == options
             else:
                 return actual_value in options  # Treat as a Set
 
-        if self.temp_source:
-            if not matches_any(IntervalAnalyzer.get_series_column_value(interval, 'tempSource'), self.temp_source):
-                return False
+        def get(*args):
+            """
+            Args:
+                *args: a list of strings that represent a set of keys that should be accessed, in order (locator, key, ...) in order
+                to find a value in the interval dictionary. If any key along the path does not exist, None is returned.
+            """
+            v = interval_dict
+            for key in args:
+                v = v.get(key, None)
+                if v is None:
+                    return v
+            return v
 
-        if self.locator_type:
-            if not matches_any(IntervalAnalyzer.get_locator_attr(interval, 'type'), self.locator_type):
+        if self.temp_source:
+            if not matches_any(get('tempSource'), self.temp_source):
                 return False
+        elif self.locator_type:
+            if not matches_any(get(IntervalAnalyzer.STRUCTURED_LOCATOR_ATTR_NAME, 'type'), self.locator_type):
+                return False
+        else:
+            # .matches must be fairly fast to run on average, so prevent overly board selection.
+            raise IOError('For performance reasons, specify either a temp_source or locator_type')
 
         if self.reason:
-            if not matches_any(IntervalAnalyzer.get_message_attr(interval, 'reason'), self.reason):
+            if not matches_any(get(IntervalAnalyzer.STRUCTURED_MESSAGE_ATTR_NAME, 'reason'), self.reason):
                 return False
 
         if self.cause:
-            if not matches_any(IntervalAnalyzer.get_message_attr(interval, 'cause'), self.cause):
+            if not matches_any(get(IntervalAnalyzer.STRUCTURED_MESSAGE_ATTR_NAME, 'cause'), self.cause):
                 return False
 
         if self.locator_keys_exist:
             for locator_key in self.locator_keys_exist:
-                if IntervalAnalyzer.get_locator_key(interval, locator_key) is None:
+                if get(IntervalAnalyzer.STRUCTURED_LOCATOR_ATTR_NAME, 'keys', locator_key) is None:
                     return False
 
         if self.message_contains:
-            message = IntervalAnalyzer.get_series_column_value(interval, 'message')
+            message = get('message')
             if not message or self.message_contains not in message:
                 return False
 
@@ -95,16 +111,18 @@ class SimpleIntervalMatcher:
 
         if self.locator_keys_match:
             for locator_key, required_value in self.locator_keys_match.items():
-                return required_value_matches(IntervalAnalyzer.get_locator_key(interval, locator_key), required_value)
+                if not required_value_matches(get(IntervalAnalyzer.STRUCTURED_LOCATOR_ATTR_NAME, 'keys', locator_key), required_value):
+                    return False
 
         if self.annotations_exist:
             for annotation_name in self.annotations_exist:
-                if IntervalAnalyzer.get_message_annotation(interval, annotation_name) is None:
+                if get(IntervalAnalyzer.STRUCTURED_MESSAGE_ATTR_NAME, 'annotations', annotation_name) is None:
                     return False
 
         if self.annotations_match:
             for annotation_name, required_value in self.annotations_match.items():
-                return required_value_matches(IntervalAnalyzer.get_message_annotation(interval, annotation_name), required_value)
+                if not required_value_matches(get(IntervalAnalyzer.STRUCTURED_MESSAGE_ATTR_NAME, 'annotations', annotation_name), required_value):
+                    return False
 
         return True
 
@@ -113,7 +131,7 @@ class IntervalClassification:
 
     def __init__(self, display_name: str,
                  category: IntervalCategory, color: Optional[arcade.Color] = arcade.color.GRAY,
-                 series_matcher: Optional[Callable[[pd.Series], bool]] = None,
+                 series_matcher: Optional[Callable[[Dict], bool]] = None,
                  simple_series_matcher: Optional[SimpleIntervalMatcher] = None,
                  timeline_differentiator: Optional[str] = None,):
         self.display_name = display_name
@@ -126,16 +144,20 @@ class IntervalClassification:
         # For example, ContainerLifecycle and ContainerReadiness
         self.timeline_differentiator = timeline_differentiator
 
-    def matches(self, interval: pd.Series) -> bool:
+    def matches(self, interval_dict: Dict) -> bool:
         if self.simple_series_matcher:
-            return self.simple_series_matcher.matches(interval)
+            return self.simple_series_matcher.matches(interval_dict)
         if self.does_series_match:
-            return self.does_series_match(interval)
+            return self.does_series_match(interval_dict)
         return False
 
-    def get_timeline_id(self, interval: pd.Series):
-        locator = interval['locator']
-        return f'{locator} {self.timeline_differentiator}'
+    def decorate_interval(self, interval_dict: Dict):
+        interval_dict['timeline_id'] = f"{interval_dict['locator']} {self.timeline_differentiator}"
+        interval_dict['classification'] = self
+        interval_dict['classification_str'] = self.display_name.lower()
+        interval_dict['category'] = self.category.value
+        interval_dict['category_str'] = self.category.value.lower()
+        interval_dict['color'] = self.color
 
 
 def hex_to_color(hex_color_code) -> arcade.Color:
@@ -566,11 +588,13 @@ class IntervalClassifications(Enum):
 
 class IntervalAnalyzer:
 
-    STRUCTURED_LOCATOR_PREFIX = 'tempStructuredLocator.'
-    STRUCTURED_LOCATOR_KEY_PREFIX = 'tempStructuredLocator.keys.'
+    STRUCTURED_LOCATOR_ATTR_NAME = 'tempStructuredLocator'
+    STRUCTURED_LOCATOR_PREFIX = f'{STRUCTURED_LOCATOR_ATTR_NAME}.'
+    STRUCTURED_LOCATOR_KEY_PREFIX = f'{STRUCTURED_LOCATOR_PREFIX}keys.'
 
-    STRUCTURED_MESSAGE_PREFIX = 'tempStructuredMessage.'
-    STRUCTURED_MESSAGE_ANNOTATION_PREFIX = 'tempStructuredMessage.annotations.'
+    STRUCTURED_MESSAGE_ATTR_NAME = 'tempStructuredMessage'
+    STRUCTURED_MESSAGE_PREFIX = f'{STRUCTURED_MESSAGE_ATTR_NAME}.'
+    STRUCTURED_MESSAGE_ANNOTATION_PREFIX = f'{STRUCTURED_MESSAGE_PREFIX}annotations.'
 
     @classmethod
     def get_series_column_value(cls, interval: pd.Series, column_name: str) -> Optional[str]:

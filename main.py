@@ -743,6 +743,16 @@ class HorizontalScrollBar(SimpleRect):
             bottom=Layout.HORIZONTAL_SCROLL_BAR_BOTTOM,
         )
 
+    def get_percent_scroll(self, x) -> float:
+        """
+        Given an offset x on the screen, if the left of the handle were to navigate to that x position,
+        what percentage scrolled would the handle be?
+        """
+        offset_x, _ = self.offset_of_xy(x, 0)
+        scrollable_pixels = max(self.width - self.handle.width, 1)
+        distance_from_left = offset_x - self.left
+        percent = min(distance_from_left / scrollable_pixels, 1.0)
+        return max(0, percent)
 
     def on_resize(self):
         self.position(
@@ -1201,14 +1211,29 @@ class GraphSection(arcade.Section):
         self.mouse_button_active_drag.pop(button, None)
 
     def track_scroll_y(self, y: int):
+        """
+        Trigger a vertical scroll based on a y position on the window.
+        """
         rows = int((len(self.ei.grouped_intervals) - self.calc_rows_to_display() + 2) * self.vertical_scroll_bar.get_percent_scroll(y))
         self.scroll_y_rows = rows
+
+    def track_scroll_x(self, x: int):
+        """
+        Trigger a vertical scroll based on an x position on the window.
+        """
+        target_percent = self.horizontal_scroll_bar.get_percent_scroll(x)
+        current_timedelta_in_zoom = int((self.ei.zoom_timeline_stop - self.ei.zoom_timeline_start).to_timedelta64())
+        target_start_nanos = int(((self.ei.absolute_timeline_stop - self.ei.absolute_timeline_start ).to_timedelta64() - current_timedelta_in_zoom) * target_percent)
+        target_start_time = self.ei.absolute_timeline_start + datetime.timedelta(seconds=target_start_nanos // 1000000000)
+        self.zoom_to_dates(target_start_time, target_start_time + datetime.timedelta(seconds=current_timedelta_in_zoom // 1000000000))
 
     def on_mouse_press(self, x: int, y: int, button: int, modifiers: int):
         self.mouse_button_down[button] = (x, y, modifiers)
 
         if x >= self.vertical_scroll_bar.left:  # If you click anywhere on the right side of the screen, we'll try to get close
             self.track_scroll_y(y)
+        elif y >= self.horizontal_scroll_bar.bottom and y <= self.horizontal_scroll_bar.top:
+            self.track_scroll_x(x)
 
     def location_within_vertical_scroll_bar(self, x: int, y: int) -> bool:
         return self.vertical_scroll_bar.is_xy_within(x, y)

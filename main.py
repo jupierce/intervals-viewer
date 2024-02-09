@@ -660,7 +660,8 @@ class IntervalsTimeline:
 class VerticalScrollBar(SimpleRect):
 
     def __init__(self, window: arcade.Window):
-        super().__init__(color=arcade.color.LIGHT_GRAY)
+        super().__init__(color=arcade.color.GHOST_WHITE)
+        self.handle = SimpleRect(arcade.color.DARK_GRAY, border_color=arcade.color.ALLOY_ORANGE, border_width=2)
         self.scroll_percent = 0.0
         self.window = window
         self.current_scrolled_y_rows = 0
@@ -668,10 +669,24 @@ class VerticalScrollBar(SimpleRect):
         self.scrollable_row_count = 1
         self.on_resize()
 
+    def position_handle(self):
+        if self.scrollable_row_count > 0:
+            handle_height_px = min(self.height, int(self.current_rows_per_page / self.scrollable_row_count * self.height))  # the handle should shrink as the rows on the page represent a smaller fraction of available rows
+            available_scroll_bar_height = self.height - handle_height_px
+            handle_y_percentage = self.current_scrolled_y_rows / self.scrollable_row_count  # % distance from the top
+            handle_y_offset = handle_y_percentage * available_scroll_bar_height
+            self.handle.position(
+                left=self.left,
+                right=self.right,
+                top=int(self.top - handle_y_offset),
+                bottom=int(self.top - handle_y_offset - handle_height_px),
+            )
+
     def on_scrolling_change(self, current_scrolled_y_rows: int, current_rows_per_page: int, available_row_count: int):
         self.current_scrolled_y_rows = current_scrolled_y_rows
         self.scrollable_row_count = max(1, available_row_count - current_rows_per_page + 2)  # prevent divide by zero
         self.current_rows_per_page = current_rows_per_page
+        self.position_handle()
 
     def on_resize(self):
         self.position(
@@ -680,28 +695,20 @@ class VerticalScrollBar(SimpleRect):
             bottom=Layout.VERTICAL_SCROLL_BAR_BOTTOM,
             top=self.window.height - Layout.VERTICAL_SCROLL_BAR_TOP_OFFSET
         )
+        self.position_handle()
 
     def draw(self):
         super().draw()
         if self.scrollable_row_count > 0:
-            handle_height_px = min(self.height, int(self.current_rows_per_page / self.scrollable_row_count * self.height))  # the handle should shrink as the rows on the page represent a smaller fraction of available rows
-            available_scroll_bar_height = self.height - handle_height_px
-            handle_y_percentage = self.current_scrolled_y_rows / self.scrollable_row_count  # % distance from the top
-            handle_y_offset = handle_y_percentage * available_scroll_bar_height
-            arcade.draw_lrtb_rectangle_filled(
-                left=self.left,
-                right=self.right,
-                top=self.top - handle_y_offset,
-                bottom=self.top - handle_y_offset - handle_height_px,
-                color=arcade.color.DARK_GRAY
-            )
+            self.handle.draw()
 
 
 class HorizontalScrollBar(SimpleRect):
 
     def __init__(self, window: arcade.Window, ei: EventsInspector):
-        super().__init__(color=arcade.color.LIGHT_GRAY)
+        super().__init__(color=arcade.color.GHOST_WHITE)
         self.background_clearer = SimpleRect(arcade.color.BLACK)
+        self.handle = SimpleRect(arcade.color.DARK_GRAY, border_width=2, border_color=arcade.color.ALLOY_ORANGE)
         self.ei = ei
         self.window = window
         self.width_percentage = 100.0
@@ -714,6 +721,17 @@ class HorizontalScrollBar(SimpleRect):
         timedelta_possible = self.ei.absolute_timeline_stop - self.ei.absolute_timeline_start
         self.width_percentage = (timedelta_displayed.total_seconds() / timedelta_possible.total_seconds())
         self.left_offset_percentage = (self.ei.zoom_timeline_stop - self.ei.absolute_timeline_start).total_seconds() / timedelta_possible.total_seconds()
+
+        handle_width = int(self.width_percentage * self.width)
+        unoccupied_width = self.width - handle_width
+        left_offset = int(unoccupied_width * self.left_offset_percentage)
+        self.handle.position(
+            left=Layout.HORIZONTAL_SCROLL_BAR_LEFT + left_offset,
+            right=Layout.HORIZONTAL_SCROLL_BAR_LEFT + left_offset + handle_width,
+            top=Layout.HORIZONTAL_SCROLL_BAR_TOP,
+            bottom=Layout.HORIZONTAL_SCROLL_BAR_BOTTOM,
+        )
+
 
     def on_resize(self):
         self.position(
@@ -732,16 +750,7 @@ class HorizontalScrollBar(SimpleRect):
     def draw(self):
         self.background_clearer.draw()
         super().draw()
-        handle_width = int(self.width_percentage * self.width)
-        unoccupied_width = self.width - handle_width
-        left_offset = int(unoccupied_width * self.left_offset_percentage)
-        arcade.draw_lrtb_rectangle_filled(
-            left=Layout.HORIZONTAL_SCROLL_BAR_LEFT + left_offset,
-            right=Layout.HORIZONTAL_SCROLL_BAR_LEFT + left_offset + handle_width,
-            top=Layout.HORIZONTAL_SCROLL_BAR_TOP,
-            bottom=Layout.HORIZONTAL_SCROLL_BAR_BOTTOM,
-            color=arcade.color.DARK_GRAY
-        )
+        self.handle.draw()
 
 
 class CategoryBar(SimpleRect):

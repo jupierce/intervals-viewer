@@ -5,7 +5,7 @@ import traceback
 from pandas.core.groupby import DataFrameGroupBy
 from datetime import datetime, timedelta
 from typing import Optional, Tuple, Union, List, Dict, Iterable
-from .intervals import IntervalClassification, IntervalClassifications, IntervalCategory
+from .intervals import IntervalClassification, IntervalClassifications, IntervalCategories, IntervalCategory
 
 NANOSECONDS_PER_SECOND = 1000000000
 
@@ -82,7 +82,7 @@ class EventsInspector:
         # Provide each classification an opportunity to choose the rows it represents. IntervalClassifications
         # will enumerate in order, and the first classification to claim a row will keep it.
         for classifier in IntervalClassifications:
-            classifier.value.apply(new_events)
+            new_events = classifier.value.apply(new_events)
 
         new_events = new_events.assign(timeline_id=lambda row: row['locator'] + '-' + row['timeline_diff'])
 

@@ -61,6 +61,8 @@ def download_file(url, status_lock, status: DownloadStatus):
 
 class ImportTimelineView(arcade.View):
 
+    INIT_STATUS_MESSAGE = 'On Linux, install xclip for Ctrl-V support. Enter URL and hit import.'
+
     def __init__(self, window: arcade.Window, load_data: Callable):
         super().__init__(window)
         self.download_checker: Optional[Callable] = None
@@ -115,7 +117,7 @@ class ImportTimelineView(arcade.View):
         self.v_box.add(buttons_hbox.with_space_around(top=20))
 
         self.status_area = arcade.gui.UITextArea(
-            text='On Linux, install xclip for Ctrl-V support. Enter URL and hit import.',
+            text=ImportTimelineView.INIT_STATUS_MESSAGE,
             height=500,
             width=1000,
             bold=True,
@@ -135,6 +137,9 @@ class ImportTimelineView(arcade.View):
 
     def on_resize(self, window_width: int, window_height: int):
         super().on_resize(window_width, window_height)
+
+    def on_show(self):
+        self.status_area.text = ImportTimelineView.INIT_STATUS_MESSAGE
 
     def check_download(self, download_thread: threading.Thread, status_lock: threading.Lock, status: DownloadStatus):
         def set_status_area(description: str):

@@ -8,7 +8,7 @@ import arcade
 from typing import Optional, List, Tuple, Dict, Set, Iterable
 
 from analyzer import SimpleRect, EventsInspector, humanize_timedelta
-from analyzer.intervals import IntervalAnalyzer, IntervalCategory, IntervalClassification, IntervalClassifications
+from analyzer.intervals import IntervalAnalyzer, IntervalCategories, IntervalClassification, IntervalClassifications
 from ui import FilteringView, ImportTimelineView
 from ui.layout import Theme, Layout
 
@@ -60,8 +60,9 @@ class MessageSection(arcade.Section):
     def set_message(self, message: Optional[str]):
         if not message:
             self.long_text.text = '''
-[R]=Reset Zoom  [+/-]=Timeline Height  [F1] Filtering
-[Home/End]=Scroll Top/Bottom  [PgUp/PgDown/\u2191/\u2193/\u2190/\u2192]=Scroll            
+[R]=Reset Zoom  [+/-]=Timeline Height  [F1] Filtering  [C] Collapse  
+[Home/End]=Scroll Top/Bottom  [PgUp/PgDown/\u2191/\u2193/\u2190/\u2192]=Scroll
+[I] Import Additional Data            
 '''.strip()  # Strip initial linefeed
         else:
             self.long_text.text = message
@@ -325,21 +326,22 @@ class ColorLegendBar(SimpleRect):
             bold=True,
         )
 
-        self.legends: Dict[IntervalCategory, List[ColorLegendEntry]] = dict()
+        self.legends: Dict[str, List[ColorLegendEntry]] = dict()
         x_offsets: Dict[str, int] = dict()
-        for category in [e.value for e in IntervalCategory]:
-            self.legends[category] = list()
-            x_offsets[category] = Layout.ZOOM_DATE_RANGE_DISPLAY_BAR_LEFT + self.legend_label.content_width + 4  # When a category is display, each entry needs to shift by an offset
+        for category in [e.value for e in IntervalCategories]:
+            category_name = category.display_name
+            self.legends[category_name] = list()
+            x_offsets[category_name] = Layout.ZOOM_DATE_RANGE_DISPLAY_BAR_LEFT + self.legend_label.content_width + 4  # When a category is display, each entry needs to shift by an offset
 
         for classification in self.classifications:
-            category_value = classification.category.value
-            category_element_list = self.legends[category_value]
-            x_offset = x_offsets[category_value]
+            category_name = classification.category.value.display_name
+            category_element_list = self.legends[category_name]
+            x_offset = x_offsets[category_name]
             entry = ColorLegendEntry(self.window, classification)
             category_element_list.append(entry)
             entry.pos(x_offset)
             x_offset += entry.width + 4  # 4px between legend entries
-            x_offsets[category_value] = x_offset  # Store the offset for the next entry's offset
+            x_offsets[category_name] = x_offset  # Store the offset for the next entry's offset
 
         self.on_resize()
 
@@ -361,12 +363,13 @@ class ColorLegendBar(SimpleRect):
         mouse_over_intervals = detail_section_ref.mouse_over_intervals
         if mouse_over_intervals is not None:
             first_interval = mouse_over_intervals.iloc[0]
-            category: IntervalCategory = first_interval['category']
-            for entry in self.legends[category]:
+            category_name: str = first_interval['category']
+            for entry in self.legends[category_name]:
                 entry.draw()
 
 
 class ZoomDateRangeDisplayBar(SimpleRect):
+    DEFAULT_TICK = (arcade.color.ORANGE, 0.5, 3)
     TICK_DRAW_RULES = {
         # (color, hieght%, thickness)
         60 * 60: (arcade.color.BLACK, 1.0, 3),  # hour ticks
@@ -402,9 +405,9 @@ class ZoomDateRangeDisplayBar(SimpleRect):
         start_time = self.ei.zoom_timeline_start
         stop_time = self.ei.zoom_timeline_stop
 
-        jumping_unit_options = [60*60, 60*30, 60*10, 60*5, 60, 30, 10, 5]
+        jumping_unit_options = [24*60*60, 12*60*60, 6*60*60, 60*60, 60*30, 60*10, 60*5, 60, 30, 10, 5]
 
-        tick_jumping_unit: int = jumping_unit_options[-1]  # Maximum jumping unit is hours
+        tick_jumping_unit: int = jumping_unit_options[0]  # Start with maximum jumping unit
         for jumping_unit_to_test in jumping_unit_options:
             if seconds_in_timeline / jumping_unit_to_test > self.width * 0.10:
                 # This jumping unit would result in more than a tick mark every 10 pixels
@@ -413,7 +416,7 @@ class ZoomDateRangeDisplayBar(SimpleRect):
 
         comfortable_number_of_labels = self.width // 100  # Don't position labels less than 100 pixels from each other
 
-        label_jumping_unit: int = jumping_unit_options[-1]  # Maximum distance between labels is one hour
+        label_jumping_unit: int = jumping_unit_options[0]  # Start with maximum jumping unit and narrow in on what will fit comfortably
         for jumping_unit_to_test in jumping_unit_options:
             if seconds_in_timeline / jumping_unit_to_test > comfortable_number_of_labels:
                 # This jumping unit would result in more than a tick mark every 10 pixels
@@ -447,7 +450,11 @@ class ZoomDateRangeDisplayBar(SimpleRect):
             ticket_draw_rule: Optional[Tuple] = None
             for modder in jumping_unit_options:
                 if seconds_since_midnight % modder == 0:
-                    ticket_draw_rule = ZoomDateRangeDisplayBar.TICK_DRAW_RULES[modder]
+                    if modder in ZoomDateRangeDisplayBar.TICK_DRAW_RULES:
+                        ticket_draw_rule = ZoomDateRangeDisplayBar.TICK_DRAW_RULES[modder]
+                    else:
+                        # If the tick marks are >hour, just draw the default
+                        ticket_draw_rule = ZoomDateRangeDisplayBar.DEFAULT_TICK
                     break
 
             tick_color, tick_height_percent, tick_width = ticket_draw_rule
@@ -970,13 +977,13 @@ class GraphSection(arcade.Section):
     def on_mouse_scroll(self, x: int, y: int, scroll_x: int, scroll_y: int):
         self.scroll_down_by_rows(-1 * int(scroll_y // 2))
 
-    def zoom_to_dates(self, start: datetime.datetime, end: datetime.datetime):
+    def zoom_to_dates(self, start: datetime.datetime, end: datetime.datetime,  refilter_based_on_date_range: bool = False):
         if self.first_visible_interval_timeline:
             # The user has zoomed with this row as the top of their view.
             previous_first_category = self.first_visible_interval_timeline.get_category_name()
             first_timeline_id = self.first_visible_interval_timeline.get_timeline_id()
 
-        self.ei.zoom_to_dates(start, end)
+        self.ei.zoom_to_dates(start, end, refilter_based_on_date_range)
 
         # When someone zooms, some timelines might disappear from the selection (because they do not
         # have active intervals within the selected date ranges). If enough disappear, the position of the
@@ -1016,7 +1023,11 @@ class GraphSection(arcade.Section):
             self.scroll_y_rows = len(self.ei.grouped_intervals.groups.keys())
 
         if arcade.key.R in self.keys_down:
-            self.zoom_to_dates(self.ei.absolute_timeline_start, self.ei.absolute_timeline_stop)
+            self.zoom_to_dates(self.ei.absolute_timeline_start, self.ei.absolute_timeline_stop, refilter_based_on_date_range=True)
+            self.scroll_y_rows = 0
+
+        if arcade.key.C in self.keys_down:
+            self.zoom_to_dates(self.ei.zoom_timeline_start, self.ei.zoom_timeline_stop, refilter_based_on_date_range=True)
             self.scroll_y_rows = 0
 
         if arcade.key.LEFT in self.keys_down or arcade.key.RIGHT in self.keys_down:
@@ -1184,11 +1195,11 @@ class GraphSection(arcade.Section):
             )
 
         if self.mouse_over_timeline_area:
-            # Draw a line which follows the mouse while it is over the timeline draw area.
+            # Draw a vertical line which follows the mouse while it is over the timeline draw area.
             arcade.draw_line(start_x=self.category_bar.right + self.mouse_timeline_area_offset_x,
-                             start_y=self.bottom,
+                             start_y=self.category_bar.bottom,
                              end_x=self.category_bar.right + self.mouse_timeline_area_offset_x,
-                             end_y=self.bottom + self.category_bar.height,
+                             end_y=self.category_bar.top,
                              color=Theme.COLOR_CROSS_HAIR_LINES,
                              line_width=1)
 
@@ -1372,6 +1383,12 @@ class MainWindow(arcade.Window):
 
             if self.current_view == self.filter_view and symbol == arcade.key.ESCAPE:
                 self.show_view(self.graph_view)
+
+            if self.current_view == self.import_timeline_view and symbol == arcade.key.ESCAPE and self.ei.grouped_intervals is not None:
+                self.show_view(self.graph_view)
+
+            if symbol == arcade.key.I:
+                self.show_view(self.import_timeline_view)
 
 
 # Press the green button in the gutter to run the script.

@@ -90,7 +90,7 @@ class SimpleRect:
     def draw(self):
         if self.border_color:
             arcade.draw_lrtb_rectangle_filled(self.left, self.right, self.top, self.bottom, color=self.border_color)
-        if self.right - self.left > self.border_width and self.top - self.bottom > self.border_width:
+        if self.right - self.left > (self.border_width*2) and self.top - self.bottom > (self.border_width*2):
             arcade.draw_lrtb_rectangle_filled(
                 self.left + self.border_width,
                 self.right - self.border_width,

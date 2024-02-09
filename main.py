@@ -484,7 +484,7 @@ class IntervalsTimeline:
                  timeline_row_width: int,
                  timeline_row_height: int):
         """
-        :param pd_interval_rows: a list of rows for a given locator, ordered by 'to:'
+        :param pd_interval_rows: a list of rows for a given timeline_id, ordered by 'to:'
         """
         self.first_interval_row = pd_interval_rows.iloc[0]
         self.graph_section = graph_section
@@ -731,11 +731,11 @@ class HorizontalScrollBar(SimpleRect):
         timedelta_displayed = self.ei.zoom_timeline_stop - self.ei.zoom_timeline_start
         timedelta_possible = self.ei.absolute_timeline_stop - self.ei.absolute_timeline_start
         self.width_percentage = (timedelta_displayed.total_seconds() / timedelta_possible.total_seconds())
-        self.left_offset_percentage = (self.ei.zoom_timeline_stop - self.ei.absolute_timeline_start).total_seconds() / timedelta_possible.total_seconds()
+        self.left_offset_percentage = (self.ei.zoom_timeline_start - self.ei.absolute_timeline_start).total_seconds() / timedelta_possible.total_seconds()
 
         handle_width = int(self.width_percentage * self.width)
         unoccupied_width = self.width - handle_width
-        left_offset = int(unoccupied_width * self.left_offset_percentage)
+        left_offset = int(self.width * self.left_offset_percentage)
         self.handle.position(
             left=Layout.HORIZONTAL_SCROLL_BAR_LEFT + left_offset,
             right=Layout.HORIZONTAL_SCROLL_BAR_LEFT + left_offset + handle_width,
@@ -749,9 +749,8 @@ class HorizontalScrollBar(SimpleRect):
         what percentage scrolled would the handle be?
         """
         offset_x, _ = self.offset_of_xy(x, 0)
-        scrollable_pixels = max(self.width - self.handle.width, 1)
-        distance_from_left = offset_x - self.left
-        percent = min(distance_from_left / scrollable_pixels, 1.0)
+        avaialble_scrollable_pixels = self.width - self.handle.width
+        percent = min(offset_x / avaialble_scrollable_pixels, 1.0)
         return max(0, percent)
 
     def on_resize(self):
@@ -1261,6 +1260,8 @@ class GraphSection(arcade.Section):
             from_x, from_y, with_mod = self.mouse_button_down[arcade.MOUSE_BUTTON_LEFT]
             if self.location_within_vertical_scroll_bar(from_x, from_y):
                 self.track_scroll_y(y)
+            elif self.location_within_horizontal_scroll_bar(from_x, from_y):
+                self.track_scroll_x(x)
             elif self.location_within_timeline_area(from_x, from_y):  # Only permit drag if the starting location is within the graphing area
                 if abs(from_x - x) + abs(from_y - y) > 5:
                     # If the mouse has moved at least 5 pixels from where the button first went down

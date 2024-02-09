@@ -150,15 +150,22 @@ class EventsInspector:
             to_dt = from_dt
             from_dt = t_dt
 
-        # Ensure the timeline will show at least 10 seconds of time.
-        if to_dt - from_dt < timedelta(seconds=10):
-            to_dt = from_dt + timedelta(seconds=10)
+        desired_visible_timedelta = to_dt - from_dt
 
-        if to_dt > self.absolute_timeline_stop:
-            to_dt = self.absolute_timeline_stop
+        # Ensure the timeline will show at least 10 seconds of time.
+        if desired_visible_timedelta < timedelta(seconds=10):
+            to_dt = from_dt + timedelta(seconds=10)
+            desired_visible_timedelta = to_dt - from_dt
 
         if from_dt < self.absolute_timeline_start:
             from_dt = self.absolute_timeline_start
+            to_dt = from_dt + desired_visible_timedelta
+
+        if to_dt > self.absolute_timeline_stop:
+            to_dt = self.absolute_timeline_stop
+            from_dt = to_dt - desired_visible_timedelta
+            if from_dt < self.absolute_timeline_start:
+                from_dt = self.absolute_timeline_start
 
         self.zoom_timeline_start = from_dt
         self.zoom_timeline_stop = to_dt

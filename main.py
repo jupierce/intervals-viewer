@@ -246,7 +246,7 @@ class DetailSection(arcade.Section):
         if message_attr_val:
             display_message = message_attr_val
         human_message_val = IntervalAnalyzer.get_message_attr(interval, 'humanMessage')
-        if human_message_val:
+        if human_message_val and message_attr_val != human_message_val:
             if display_message:
                 display_message += '\n'
             display_message += human_message_val
@@ -701,6 +701,17 @@ class VerticalScrollBar(SimpleRect):
         super().draw()
         if self.scrollable_row_count > 0:
             self.handle.draw()
+
+    def get_percent_scroll(self, y) -> float:
+        """
+        Given an offset y on the screen, if the top of the handle were to navigate to that y position,
+        what percentage scrolled would the handle be?
+        """
+        _, offset_y = self.offset_of_xy(0, y)
+        scrollable_pixels = max(self.height - self.handle.height, 1)
+        distance_from_top = self.height - offset_y
+        percent = min(distance_from_top / scrollable_pixels, 1.0)
+        return max(0, percent)
 
 
 class HorizontalScrollBar(SimpleRect):
@@ -1189,8 +1200,21 @@ class GraphSection(arcade.Section):
         self.mouse_button_down.pop(button, None)
         self.mouse_button_active_drag.pop(button, None)
 
+    def track_scroll_y(self, y: int):
+        rows = int((len(self.ei.grouped_intervals) - self.calc_rows_to_display() + 2) * self.vertical_scroll_bar.get_percent_scroll(y))
+        self.scroll_y_rows = rows
+
     def on_mouse_press(self, x: int, y: int, button: int, modifiers: int):
         self.mouse_button_down[button] = (x, y, modifiers)
+
+        if x >= self.vertical_scroll_bar.left:  # If you click anywhere on the right side of the screen, we'll try to get close
+            self.track_scroll_y(y)
+
+    def location_within_vertical_scroll_bar(self, x: int, y: int) -> bool:
+        return self.vertical_scroll_bar.is_xy_within(x, y)
+
+    def location_within_horizontal_scroll_bar(self, x: int, y: int) -> bool:
+        return self.horizontal_scroll_bar.is_xy_within(x, y)
 
     def location_within_timeline_area(self, x: int, y: int) -> bool:
         if x >= self.category_bar.right and x < self.vertical_scroll_bar.left and y <= self.zoom_date_range_display_bar.bottom and y > self.category_bar.bottom:
@@ -1210,7 +1234,9 @@ class GraphSection(arcade.Section):
 
         if arcade.MOUSE_BUTTON_LEFT in self.mouse_button_down:
             from_x, from_y, with_mod = self.mouse_button_down[arcade.MOUSE_BUTTON_LEFT]
-            if self.location_within_timeline_area(from_x, from_y):  # Only permit drag if the starting location is within the graphing area
+            if self.location_within_vertical_scroll_bar(from_x, from_y):
+                self.track_scroll_y(y)
+            elif self.location_within_timeline_area(from_x, from_y):  # Only permit drag if the starting location is within the graphing area
                 if abs(from_x - x) + abs(from_y - y) > 5:
                     # If the mouse has moved at least 5 pixels from where the button first went down
                     # create an active drag.

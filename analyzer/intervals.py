@@ -33,7 +33,7 @@ class IntervalAnalyzer:
         return IntervalAnalyzer.get_series_column_value(interval, f'{IntervalAnalyzer.STRUCTURED_LOCATOR_PREFIX}{attr_name}')
 
     @classmethod
-    def get_locator_key(cls, interval: pd.Series, key_name: str) -> str:
+    def get_locator_key(cls, interval: pd.Series, key_name: str) -> Optional[str]:
         return IntervalAnalyzer.get_series_column_value(interval, f'{IntervalAnalyzer.STRUCTURED_LOCATOR_KEY_PREFIX}{key_name}')
 
     @classmethod
@@ -41,7 +41,7 @@ class IntervalAnalyzer:
         return IntervalAnalyzer.get_series_column_value(interval, f'{IntervalAnalyzer.STRUCTURED_MESSAGE_PREFIX}{attr_name}')
 
     @classmethod
-    def get_message_annotation(cls, interval: pd.Series, annotation_name: str) -> str:
+    def get_message_annotation(cls, interval: pd.Series, annotation_name: str) -> Optional[str]:
         return IntervalAnalyzer.get_series_column_value(interval, f'{IntervalAnalyzer.STRUCTURED_MESSAGE_ANNOTATION_PREFIX}{annotation_name}')
 
     @classmethod

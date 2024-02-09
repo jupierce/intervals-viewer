@@ -609,6 +609,27 @@ class IntervalsTimeline:
 
         if detail_section_ref:
 
+            mouse_over_interval = detail_section_ref.mouse_over_interval
+            if mouse_over_interval is not None:
+                match_level = 0
+                for match_attr in ('namespace', 'pod', 'container', 'uid'):
+                    over_attr = IntervalAnalyzer.get_locator_key(mouse_over_interval, match_attr)
+                    if over_attr and IntervalAnalyzer.get_locator_key(self.first_interval_row, match_attr) == over_attr:
+                        match_level += 1
+                    else:
+                        break
+
+                for level in range(match_level):
+                    offset = level * 10 + 10
+                    arcade.draw_line(
+                        start_x=Layout.CATEGORY_BAR_RIGHT + offset,
+                        start_y=self.last_set_bottom + self.timeline_row_height / 2,
+                        end_x=Layout.CATEGORY_BAR_RIGHT + offset + 2,
+                        end_y=self.last_set_bottom + self.timeline_row_height / 2,
+                        line_width=self.timeline_row_height,
+                        color=arcade.color.YELLOW,
+                    )
+
             def clear_my_interval_detail():
                 if self.interval_under_mouse is not None:
                     # If we set the interval being displayed by the detail section, clear it
@@ -1133,7 +1154,7 @@ class GraphSection(arcade.Section):
 
         if len(row_id_tuples_to_render) < rows_to_display:
             # If we don't have enough rows to render, then clear the background
-            # to erase any old timelines.
+            # to erase any old timelines from the bottom of the viewing area.
             arcade.draw_xywh_rectangle_filled(
                 bottom_left_y=self.category_bar.bottom,
                 bottom_left_x=self.category_bar.right,

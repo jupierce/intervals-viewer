@@ -609,11 +609,21 @@ class IntervalsTimeline:
 
         if detail_section_ref:
 
-            mouse_over_interval = detail_section_ref.mouse_over_interval
-            if mouse_over_interval is not None:
+            def clear_my_interval_detail():
+                if self.interval_under_mouse is not None:
+                    # If we set the interval being displayed by the detail section, clear it
+                    if self.interval_under_mouse.equals(detail_section_ref.mouse_over_interval):
+                        detail_section_ref.set_mouse_over_interval(None)
+                    self.interval_under_mouse = None
+
+            # See if the mouse is over a timeline that shares something in common with us (e.g. namespace).
+            # if it does, render one or more yellow lines to indicate how much of a match we are.
+            mouse_over_intervals = detail_section_ref.mouse_over_intervals
+            if mouse_over_intervals is not None:
+                first_interval_of_mouse_over_intervals = mouse_over_intervals.iloc[0]
                 match_level = 0
                 for match_attr in ('namespace', 'pod', 'container', 'uid'):
-                    over_attr = IntervalAnalyzer.get_locator_key(mouse_over_interval, match_attr)
+                    over_attr = IntervalAnalyzer.get_locator_key(first_interval_of_mouse_over_intervals, match_attr)
                     if over_attr and IntervalAnalyzer.get_locator_key(self.first_interval_row, match_attr) == over_attr:
                         match_level += 1
                     else:
@@ -629,13 +639,6 @@ class IntervalsTimeline:
                         line_width=self.timeline_row_height,
                         color=arcade.color.YELLOW,
                     )
-
-            def clear_my_interval_detail():
-                if self.interval_under_mouse is not None:
-                    # If we set the interval being displayed by the detail section, clear it
-                    if self.interval_under_mouse.equals(detail_section_ref.mouse_over_interval):
-                        detail_section_ref.set_mouse_over_interval(None)
-                    self.interval_under_mouse = None
 
             # See if the mouse is over this particular timeline row visualization
             if mouse_y >= row_bottom and mouse_y < row_top:

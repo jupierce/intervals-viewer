@@ -2,6 +2,8 @@ import pandas as pd
 from enum import Enum
 from typing import Optional, Union, List, Callable, Set, Dict
 import arcade
+import pandas.errors
+
 from .util import prioritized_sort
 
 class IntervalAnalyzer:
@@ -154,7 +156,10 @@ class IntervalClassification:
 
     def apply(self, events_df: pd.DataFrame):
         if self.series_matcher:  # If there is no matcher specified, it can't match anything.
-            events_df.loc[events_df.eval(self.series_matcher.targeting_query), ['category', 'category_str_lower', 'classification', 'classification_str_lower', 'timeline_diff']] = self.category.value, self.category.value.lower(), self, self.display_name.lower(), self.timeline_differentiator
+            try:
+                events_df.loc[events_df.eval(self.series_matcher.targeting_query), ['category', 'category_str_lower', 'classification', 'classification_str_lower', 'timeline_diff']] = self.category.value, self.category.value.lower(), self, self.display_name.lower(), self.timeline_differentiator
+            except pandas.errors.UndefinedVariableError:
+                print(f'warning: no keys in json available to allow classification of type: {self.display_name}')
 
 
 def hex_to_color(hex_color_code) -> arcade.Color:

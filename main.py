@@ -1366,11 +1366,12 @@ class MainWindow(arcade.Window):
             self.filter_view.on_resize(width, height)
 
     def on_key_press(self, symbol: int, modifiers: int):
-        if symbol == arcade.key.F1 or symbol == arcade.key.SLASH:
-            self.show_view(self.filter_view)
+        if self.current_view != self.import_timeline_view:
+            if symbol == arcade.key.F1 or symbol == arcade.key.SLASH and self.current_view == self.graph_view:
+                self.show_view(self.filter_view)
 
-        if self.current_view == self.filter_view and symbol == arcade.key.ESCAPE:
-            self.show_view(self.graph_view)
+            if self.current_view == self.filter_view and symbol == arcade.key.ESCAPE:
+                self.show_view(self.graph_view)
 
 
 # Press the green button in the gutter to run the script.

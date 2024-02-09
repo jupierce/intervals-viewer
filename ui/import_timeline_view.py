@@ -25,16 +25,29 @@ class DownloadStatus:
 
 def download_file(url, status_lock, status: DownloadStatus):
     try:
-        with closing(requests.get(url, stream=True)) as response:
-            response.raise_for_status()
-            downloaded_size = 0
-            for chunk in response.iter_content(chunk_size=1024*1024):
-                if chunk:
-                    downloaded_size += len(chunk)
-                    mb = downloaded_size / (1024*1024)
-                    with status_lock:
-                        status.buffer.write(chunk)
-                        status.message = f'Downloading.. {mb:.2f}MB'
+        file_path = None
+        if url.lower().startswith('file://'):
+            file_path = url[len('file://'):]
+
+        if '://' not in url:
+            file_path = url
+
+        if file_path:
+            with open(file_path, "rb") as fh:
+                with status_lock:
+                    status.message = 'Reading local file..'
+                    status.buffer = io.BytesIO(fh.read())
+        else:
+            with closing(requests.get(url, stream=True)) as response:
+                response.raise_for_status()
+                downloaded_size = 0
+                for chunk in response.iter_content(chunk_size=1024*1024):
+                    if chunk:
+                        downloaded_size += len(chunk)
+                        mb = downloaded_size / (1024*1024)
+                        with status_lock:
+                            status.buffer.write(chunk)
+                            status.message = f'Downloading.. {mb:.2f}MB'
 
     except Exception as e:
         with status_lock:

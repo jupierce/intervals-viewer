@@ -363,7 +363,7 @@ class ColorLegendBar(SimpleRect):
         mouse_over_intervals = detail_section_ref.mouse_over_intervals
         if mouse_over_intervals is not None:
             first_interval = mouse_over_intervals.iloc[0]
-            category_name: str = first_interval['category']
+            category_name: str = first_interval['category_str']
             for entry in self.legends[category_name]:
                 entry.draw()
 
@@ -655,7 +655,7 @@ class IntervalsTimeline:
                 clear_my_interval_detail()
 
     def get_category_name(self) -> str:
-        return self.first_interval_row['category']
+        return self.first_interval_row['category_str']
 
     def get_locator_value(self) -> str:
         return self.first_interval_row['locator']
@@ -936,12 +936,12 @@ class GraphSection(arcade.Section):
     @lru_cache(1000)
     def get_interval_timeline(self, group_id, timeline_start_time, timeline_stop_time, timeline_row_width, timeline_row_height) -> IntervalsTimeline:
         """
-        :param group_id: A key for ei.grouped_intervals to find a DataFrame of interval rows for a specific timeline row.
+        :param group_id: A key for ei.timelines to find a DataFrame of interval rows for a specific timeline row.
         :param timeline_row_width: The on-screen width (px) the timeline row should occupy when rendered.
         :param timeline_row_height: The on-screen height (px), the timeline row should occupy when rendered.
         :return: IntervalsTimeline capable of drawing the timeline on screen.
         """
-        intervals_for_row_df: pd.DataFrame = self.ei.grouped_intervals.get_group(group_id)
+        intervals_for_row_df: pd.DataFrame = self.ei.timelines[group_id]
         interval_timeline = IntervalsTimeline(
             graph_section=self,
             ei=self.ei,
@@ -967,7 +967,7 @@ class GraphSection(arcade.Section):
         self.vertical_scroll_bar.on_scrolling_change(
             current_scrolled_y_rows=self.scroll_y_rows,
             current_rows_per_page=self.calc_rows_to_display(),
-            available_row_count=len(self.ei.grouped_intervals.groups.keys())
+            available_row_count=len(self.ei.timelines)
         )
         self.horizontal_scroll_bar.on_scrolling_change()
 
@@ -978,6 +978,8 @@ class GraphSection(arcade.Section):
         self.scroll_down_by_rows(-1 * int(scroll_y // 2))
 
     def zoom_to_dates(self, start: datetime.datetime, end: datetime.datetime,  refilter_based_on_date_range: bool = False):
+        first_timeline_id = None
+        previous_first_category = None
         if self.first_visible_interval_timeline:
             # The user has zoomed with this row as the top of their view.
             previous_first_category = self.first_visible_interval_timeline.get_category_name()
@@ -985,23 +987,24 @@ class GraphSection(arcade.Section):
 
         self.ei.zoom_to_dates(start, end, refilter_based_on_date_range)
 
-        # When someone zooms, some timelines might disappear from the selection (because they do not
-        # have active intervals within the selected date ranges). If enough disappear, the position of the
-        # old scroll location may be well away from the old visible rows -- which can be disorienting
-        # because the user no longer sees the old visible patterns. To account for this, when they scroll,
-        # we search for a category/locator pair that is closest to what the top row used to be before
-        # the scroll.
-        # If we find a good match, we scroll to that new location in the timeline rows.
-        target_for_scroll: Optional[int] = None  # if we can't find anything close, scroll back to the top
-        timeline_number = 0
-        for row_id_tuple in self.ei.grouped_intervals.groups.keys():
-            # Intervals are grouped by category, and then timeline_id. So a group
-            # key will be a tuple (category, timeline_id).
-            row_category, row_locator = row_id_tuple
-            if row_category >= previous_first_category and row_locator >= first_timeline_id:
-                target_for_scroll = timeline_number
-                break
-            timeline_number += 1
+        if first_timeline_id is not None:
+            # When someone zooms, some timelines might disappear from the selection (because they do not
+            # have active intervals within the selected date ranges). If enough disappear, the position of the
+            # old scroll location may be well away from the old visible rows -- which can be disorienting
+            # because the user no longer sees the old visible patterns. To account for this, when they scroll,
+            # we search for a category/locator pair that is closest to what the top row used to be before
+            # the scroll.
+            # If we find a good match, we scroll to that new location in the timeline rows.
+            target_for_scroll: Optional[int] = None  # if we can't find anything close, scroll back to the top
+            timeline_number = 0
+            for row_id_tuple in self.ei.timelines.keys():
+                # Intervals are grouped by category, and then timeline_id. So a group
+                # key will be a tuple (category, timeline_id).
+                row_category, row_timeline_id = row_id_tuple
+                if row_category >= previous_first_category and row_timeline_id >= first_timeline_id:
+                    target_for_scroll = timeline_number
+                    break
+                timeline_number += 1
 
         if target_for_scroll is not None:
             self.scroll_y_rows = target_for_scroll
@@ -1020,7 +1023,7 @@ class GraphSection(arcade.Section):
             self.scroll_y_rows = 0
 
         if arcade.key.END in self.keys_down:
-            self.scroll_y_rows = len(self.ei.grouped_intervals.groups.keys())
+            self.scroll_y_rows = len(self.ei.timelines.keys())
 
         if arcade.key.R in self.keys_down:
             self.zoom_to_dates(self.ei.absolute_timeline_start, self.ei.absolute_timeline_stop, refilter_based_on_date_range=True)
@@ -1120,7 +1123,7 @@ class GraphSection(arcade.Section):
         # If the minimum height of each row is ?px, then figure out how
         # many we can fit in the graph area.
         rows_to_display = self.calc_rows_to_display()
-        available_timelines_ids = list(self.ei.grouped_intervals.groups.keys())
+        available_timelines_ids = list(self.ei.timelines.keys())
 
         # If the user has hit END or scrolled to the end of the data, show the last full page
         if self.scroll_y_rows > len(available_timelines_ids) - self.calc_rows_to_display():
@@ -1224,7 +1227,7 @@ class GraphSection(arcade.Section):
         """
         Trigger a vertical scroll based on a y position on the window.
         """
-        rows = int((len(self.ei.grouped_intervals) - self.calc_rows_to_display() + 2) * self.vertical_scroll_bar.get_percent_scroll(y))
+        rows = int((len(self.ei.timelines) - self.calc_rows_to_display() + 2) * self.vertical_scroll_bar.get_percent_scroll(y))
         self.scroll_y_rows = rows
 
     def track_scroll_x(self, x: int):
@@ -1384,7 +1387,7 @@ class MainWindow(arcade.Window):
             if self.current_view == self.filter_view and symbol == arcade.key.ESCAPE:
                 self.show_view(self.graph_view)
 
-            if self.current_view == self.import_timeline_view and symbol == arcade.key.ESCAPE and self.ei.grouped_intervals is not None:
+            if self.current_view == self.import_timeline_view and symbol == arcade.key.ESCAPE and len(self.ei.timelines) > 0:
                 self.show_view(self.graph_view)
 
             if symbol == arcade.key.I:

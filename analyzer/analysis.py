@@ -4,8 +4,9 @@ import pandas as pd
 import traceback
 from pandas.core.groupby import DataFrameGroupBy
 from datetime import datetime, timedelta
-from typing import Optional, Tuple, Union, List, Dict, Iterable
+from typing import Optional, Tuple, Union, List, Dict, Iterable, Any
 from .intervals import IntervalClassification, IntervalClassifications, IntervalCategories, IntervalCategory
+from collections import OrderedDict
 
 NANOSECONDS_PER_SECOND = 1000000000
 
@@ -63,10 +64,10 @@ class EventsInspector:
         # The number of seconds each time is expected to represent
         self.current_zoom_timeline_seconds: Optional[float] = 1
 
-        # Will store the currently selected rows, grouped by a tuple key (category, locator).
+        # Will store the currently selected rows, grouped by a tuple key (category, timeline_id).
         # Each group is, in effective, all the intervals that should be rendered for a
         # timeline row.
-        self.grouped_intervals: Optional[DataFrameGroupBy] = None
+        self.timelines: Dict[Any, pd.DataFrame] = dict()
 
         self.details: Details = Details(self)
         self.last_filter_query: Optional[str] = None
@@ -76,7 +77,7 @@ class EventsInspector:
         new_events['classification'] = None  # Initialize classification to null for all rows
 
         # Requires string columns
-        for required_column in ('category', 'category_str_lower', 'classification_str_lower', 'timeline_diff'):
+        for required_column in ('category_str', 'category_str_lower', 'classification_str_lower', 'timeline_diff'):
             new_events[required_column] = ''
 
         # Provide each classification an opportunity to choose the rows it represents. IntervalClassifications
@@ -107,7 +108,7 @@ class EventsInspector:
         self.absolute_timeline_stop: pd.Timestamp = (self.events_df['to'].max()).ceil('min')
 
         # Order rows by category, timeline, then make sure all rows are in chronological order by start time
-        self.events_df = self.events_df.sort_values(['category', 'timeline_id', 'from'], ascending=True)
+        self.events_df = self.events_df.sort_values(['category_str', 'timeline_id', 'from'], ascending=True)
 
         self.zoom_timeline_start: pd.Timestamp = self.absolute_timeline_start
         self.zoom_timeline_stop: pd.Timestamp = self.absolute_timeline_stop
@@ -122,7 +123,26 @@ class EventsInspector:
         """
         df = self.selected_rows
         filtered_df = df[(df['to'] >= self.zoom_timeline_start) & (df['from'] <= self.zoom_timeline_stop)]
-        self.grouped_intervals = filtered_df.groupby(['category', 'timeline_id'])
+
+        # This is tricky. We could collect up the dataframes associated with each timeline
+        # with a simple df.groupby(['category_str', 'timeline_id']). However, when viewing the
+        # timelines on the screen, we want sometimes want the order of the timelines WITHIN A GROUP to be
+        # ordered by the earliest interval in that timeline. For e2etests, for example,
+        # it ensures that a visualization that looks like a waterfall of ordered test executions
+        # vertically, vs the random row ordering we would have otherwise.
+        # For other groups, we want the timelines to be displayed in 'locator' order so that
+        # activities in namespaces/pods/containers are sequential.
+        category_groups = filtered_df.groupby('category_str')
+        self.timelines = OrderedDict()
+        for category_key, category_timelines_data in category_groups:
+            category: IntervalCategory = category_timelines_data.iloc[0]['category']
+            timelines_by_category: Dict[Any, pd.DataFrame] = category_timelines_data.groupby('timeline_id')
+            timelines_to_order: List[Tuple[Any, pd.DataFrame]] = [(key, timeline) for key, timeline in timelines_by_category]   # Create a list of tuples (group_name, timeline dataframe) so that we can sort them by earliest interval
+            ordered_timelines = timelines_to_order  # by default, keep the same order, which will be based on timeline_id sort performed while loading data.
+            if category.order_timelines_by_earliest_from:
+                ordered_timelines = sorted(timelines_to_order, key=lambda key_df: key_df[1]['from'].min())
+            for key, timeline in ordered_timelines:
+                self.timelines[(category_key, key,)] = timeline
 
     def set_filter_query(self, query: Optional[str] = None):
         if query:

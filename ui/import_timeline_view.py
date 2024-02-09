@@ -25,6 +25,7 @@ class DownloadStatus:
 
 def download_file(url, status_lock, status: DownloadStatus):
     try:
+        url = url.strip()
         file_path = None
         if url.lower().startswith('file://'):
             file_path = url[len('file://'):]

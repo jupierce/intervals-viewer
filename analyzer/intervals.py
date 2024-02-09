@@ -171,7 +171,7 @@ class IntervalClassification:
         if self.series_matcher:  # If there is no matcher specified, it can't match anything.
             try:
                 # For any classification that has not already been set, set fields in rows with matching criteria
-                events_df.loc[events_df.eval(self.series_matcher.targeting_query), ['category', 'category_str_lower', 'classification', 'classification_str_lower', 'timeline_diff']] = self.category.value.display_name, self.category.value.display_name.lower(), self, self.display_name.lower(), self.timeline_differentiator
+                events_df.loc[events_df.eval(self.series_matcher.targeting_query), ['category', 'category_str', 'category_str_lower', 'classification', 'classification_str_lower', 'timeline_diff']] = self.category.value, self.category.value.display_name, self.category.value.display_name.lower(), self, self.display_name.lower(), self.timeline_differentiator
             except pandas.errors.UndefinedVariableError:
                 print(f'warning: no keys in json available to allow classification of type: {self.display_name}')
         return events_df

@@ -1012,6 +1012,8 @@ class GraphSection(arcade.Section):
 
         self.ei.zoom_to_dates(start, end, refilter_based_on_date_range)
 
+        # If we find a good match, we scroll to that new location in the timeline rows.
+        target_for_scroll: Optional[int] = None  # if we can't find anything close, scroll back to the top
         if first_timeline_id is not None:
             # When someone zooms, some timelines might disappear from the selection (because they do not
             # have active intervals within the selected date ranges). If enough disappear, the position of the
@@ -1019,8 +1021,6 @@ class GraphSection(arcade.Section):
             # because the user no longer sees the old visible patterns. To account for this, when they scroll,
             # we search for a category/locator pair that is closest to what the top row used to be before
             # the scroll.
-            # If we find a good match, we scroll to that new location in the timeline rows.
-            target_for_scroll: Optional[int] = None  # if we can't find anything close, scroll back to the top
             timeline_number = 0
             for row_id_tuple in self.ei.timelines.keys():
                 # Intervals are grouped by category, and then timeline_id. So a group
@@ -1380,14 +1380,17 @@ class MainWindow(arcade.Window):
         super().__init__(width, height, title, resizable=True)
         arcade.set_background_color(arcade.color.WHITE)
         self.ei = EventsInspector()
-        self.import_timeline_view = ImportTimelineView(self, load_data=lambda stream: self.on_data_load(stream))
+        self.import_timeline_view = ImportTimelineView(self, load_data=lambda url, stream: self.on_data_load(url, stream))
         self.graph_view: Optional[GraphInterfaceView] = None
         self.filter_view: Optional[FilteringView] = None
         self.show_view(self.import_timeline_view)
 
-    def on_data_load(self, stream_handle):
-        intervals_list = json.load(stream_handle)['items']
-        self.ei.add_interval_data(intervals_list)
+    def on_data_load(self, url: str, stream_handle):
+        if url.endswith('.json'):
+            intervals_list = json.load(stream_handle)['items']
+            self.ei.add_interval_dicts(intervals_list)
+        else:
+            self.ei.add_logs_data(stream_handle)
         self.graph_view = GraphInterfaceView(self.ei, self)
         self.filter_view = FilteringView(self.ei, self, on_exit=lambda: self.show_view(self.graph_view))
         self.show_view(self.graph_view)

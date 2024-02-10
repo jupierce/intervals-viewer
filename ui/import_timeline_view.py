@@ -16,16 +16,17 @@ from contextlib import closing
 
 class DownloadStatus:
 
-    def __init__(self):
+    def __init__(self, download_url: str):
+        self.download_url = download_url
         self.message = ''
         self.buffer = io.BytesIO()
         self.exception = None
         self.complete = False
 
 
-def download_file(url, status_lock, status: DownloadStatus):
+def download_file(status_lock, status: DownloadStatus):
     try:
-        url = url.strip()
+        url = status.download_url
         file_path = None
         if url.lower().startswith('file://'):
             file_path = url[len('file://'):]
@@ -64,7 +65,7 @@ class ImportTimelineView(arcade.View):
 
     INIT_STATUS_MESSAGE = 'On Linux, install xclip for Ctrl-V support. Enter URL and hit import.'
 
-    def __init__(self, window: arcade.Window, load_data: Callable):
+    def __init__(self, window: arcade.Window, load_data: Callable[[str, io.BytesIO], None]):
         super().__init__(window)
         self.download_checker: Optional[Callable] = None
         self.manager = arcade.gui.UIManager()
@@ -152,7 +153,7 @@ class ImportTimelineView(arcade.View):
             if status.complete:
                 if status.exception is None:
                     print('Loading data..')
-                    self.load_data(status.buffer)
+                    self.load_data(status.download_url.strip(), status.buffer)
                 print('Joining thread...')
                 download_thread.join()
                 arcade.unschedule(self.download_checker)
@@ -160,9 +161,9 @@ class ImportTimelineView(arcade.View):
     def on_import_click(self, event):
         download_url = self.url_ui_input.text
         status_lock = threading.Lock()
-        download_status = DownloadStatus()
+        download_status = DownloadStatus(download_url)
         download_thread = threading.Thread(target=download_file,
-                                           args=(download_url, status_lock, download_status))
+                                           args=(status_lock, download_status))
         download_thread.start()
         self.download_checker = lambda delta: self.check_download(download_thread, status_lock, download_status)
         arcade.schedule(self.download_checker, 1.0)

@@ -11,7 +11,10 @@ from collections import OrderedDict
 NANOSECONDS_PER_SECOND = 1000000000
 
 
-def seconds_between(pd_datetime_from, pd_datatime_to) -> float:
+def seconds_between(pd_datetime_from: pandas.Timestamp, pd_datatime_to:pandas.Timestamp) -> float:
+    """
+    Calculates the number of seconds between to pandas Timestamps.
+    """
     try:
         return float((pd_datatime_to - pd_datetime_from).to_timedelta64()) / NANOSECONDS_PER_SECOND
     except:
@@ -21,21 +24,6 @@ def seconds_between(pd_datetime_from, pd_datatime_to) -> float:
 
 def get_interval_duration(row: pd.Series):
     return seconds_between(row['from'], row['to'])
-
-
-def enhance_interval_data_with_classification(interval_dict: Dict):
-    """
-    Given an interval entry from JSON, decorate it with additional metadata for grouping/indexing/etc.
-    """
-    for classification in IntervalClassifications:
-        if classification.value.matches(interval_dict):
-            classification.value.decorate_interval(interval_dict)
-            break
-
-
-def get_interval_color(row: pd.Series) -> Union[arcade.Color, Tuple[int, int, int, int]]:
-    classification: IntervalClassification = row['classification']
-    return classification.color
 
 
 class Details:
@@ -72,7 +60,33 @@ class EventsInspector:
         self.details: Details = Details(self)
         self.last_filter_query: Optional[str] = None
 
-    def add_interval_data(self, intervals: Iterable[Dict]):
+    def add_logs_data(self, file_path):
+        new_events: pandas.DataFrame = pandas.read_json(file_path, lines=True)  # Read as jsonl
+        new_events['classification'] = None  # Initialize classification to null for all rows
+
+        # Requires string columns
+        for required_column in ('category_str', 'category_str_lower', 'classification_str_lower', 'timeline_diff'):
+            new_events[required_column] = ''
+
+        new_events['from'] = pd.to_datetime(new_events['requestReceivedTimestamp'], format="%Y-%m-%dT%H:%M:%S.%fZ")
+        new_events = new_events.assign(to=lambda row: row['from'] + timedelta(seconds=1))
+        new_events['tempStructuredLocator.keys.requestURI'] = new_events['requestURI']
+        new_events['tempStructuredLocator.keys.auditID'] = new_events['auditID']
+        new_events.rename(columns={
+            'requestURI': 'locator',
+            'kind': 'tempSource',
+            'auditID': 'key.auditID'
+        }, inplace=True)
+
+        for classifier in IntervalClassifications:
+            new_events = classifier.value.apply(new_events)
+
+        new_events = new_events.assign(timeline_id=lambda row: row['locator'] + '-' + row['timeline_diff'])
+        # Pre-calculate the duration, in seconds, of all intervals
+        new_events['duration'] = new_events.apply(get_interval_duration, axis=1)
+        self.add_intervals(new_events)
+
+    def add_interval_dicts(self, intervals: Iterable[Dict]):
         new_events = pd.DataFrame.from_dict(pd.json_normalize(intervals), orient='columns')
         new_events['classification'] = None  # Initialize classification to null for all rows
 
@@ -100,7 +114,9 @@ class EventsInspector:
 
         # Pre-calculate the duration, in seconds, of all intervals
         new_events['duration'] = new_events.apply(get_interval_duration, axis=1)
+        self.add_intervals(new_events)
 
+    def add_intervals(self, new_events: pandas.DataFrame):
         self.events_df = pd.concat([self.events_df, new_events], ignore_index=True, sort=False)
 
         # Reassess the data for max/min

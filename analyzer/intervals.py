@@ -88,6 +88,10 @@ class IntervalCategories(Enum):
     ClusterState = IntervalCategory('ClusterState')
     PodLog = IntervalCategory('PodLog')
 
+    AuditLog = IntervalCategory('AuditLog')
+
+
+
     # Not a real category for display, but serves to classify & color when a classification
     # is not specific to one category.
     Any = IntervalCategory('*')
@@ -590,6 +594,14 @@ class IntervalClassifications(Enum):
         category=IntervalCategories.PodLog, color=hex_to_color('#96cbff'),
         simple_interval_matcher=SimpleIntervalMatcher(
             temp_source={'PodLog', 'EtcdLog'},
+        )
+    )
+
+    AuditEvent = IntervalClassification(
+        display_name='AuditEvent',
+        category=IntervalCategories.AuditLog,
+        simple_interval_matcher=SimpleIntervalMatcher(
+            temp_source={'Event'},
         )
     )
 

@@ -65,7 +65,7 @@ class MessageSection(arcade.Section):
 [I] Import Additional Data            
 '''.strip()  # Strip initial linefeed
         else:
-            self.long_text.text = message
+            self.long_text.text = '\n'.join(message.splitlines()[:5])
 
 
 class DetailSection(arcade.Section):
@@ -518,7 +518,7 @@ class IntervalsTimeline:
         Populates an element list with the rendered timeline. on_draw uses this shape element list.
         """""
         self.shape_element_list = arcade.ShapeElementList()
-        # First, we draw a single line of background color along the full width and height of the timeline area.
+        # First, we draw a single line of transparent color along the full width and height of the timeline area.
         # This will ensure the ShapeElementList we create has the width of a timeline bar (important for
         # centering with setting position).
         background_line_start_x = 0
@@ -529,7 +529,7 @@ class IntervalsTimeline:
             end_x=background_line_end_x,
             end_y=self.timeline_row_height/2,
             line_width=self.timeline_row_height,
-            color=Theme.COLOR_TIMELINE_BACKGROUND
+            color=(0, 0, 0, 0)
         )
         self.shape_element_list.append(background_line)
 
@@ -559,7 +559,7 @@ class IntervalsTimeline:
         :return: (start_x, end_x)
         """
         interval_left_offset = self.ei.current_interval_left_offset(interval_row)
-        interval_width = self.ei.calculate_interval_width(self.timeline_row_width, interval_row)
+        interval_width = self.ei.calculate_interval_pixel_width(self.timeline_row_width, interval_row)
         interval_line_start_x = interval_left_offset
         interval_line_end_x = interval_left_offset + interval_width
         return interval_line_start_x, interval_line_end_x
@@ -573,6 +573,35 @@ class IntervalsTimeline:
 
     def draw(self, check_for_mouse_over_interval=False):
         global detail_section_ref
+
+        mouse_x, mouse_y = self.ei.last_known_mouse_location
+        row_bottom = self.shape_element_list.center_y
+        row_top = self.shape_element_list.center_y + self.timeline_row_height
+        mouse_is_over_this_timeline = mouse_y >= row_bottom and mouse_y < row_top
+
+        # See if the mouse is over a timeline that shares something in common with us (e.g. namespace).
+        # if it does, render one or more yellow lines to indicate how much of a match we are.
+        mouse_over_intervals = detail_section_ref.mouse_over_intervals
+        if mouse_over_intervals is not None:
+            first_interval_of_mouse_over_intervals = mouse_over_intervals.iloc[0]
+            match_level = 0
+            for match_attr in ('namespace', 'pod', 'container', 'uid'):
+                over_attr = IntervalAnalyzer.get_locator_key(first_interval_of_mouse_over_intervals, match_attr)
+                if over_attr and IntervalAnalyzer.get_locator_key(self.first_interval_row, match_attr) == over_attr:
+                    match_level += 1
+                else:
+                    break
+
+            for level in range(match_level):
+                arcade.draw_line(
+                    start_x=Layout.CATEGORY_BAR_RIGHT,
+                    start_y=self.last_set_bottom + self.timeline_row_height / 2,
+                    end_x=self.window.width - Layout.VERTICAL_SCROLL_BAR_RIGHT_OFFSET,
+                    end_y=self.last_set_bottom + self.timeline_row_height / 2,
+                    line_width=self.timeline_row_height,
+                    color=(255, 255, 0, 160 // (5 - level)),
+                )
+
         self.shape_element_list.draw()
 
         if self.interval_under_mouse is not None:
@@ -603,10 +632,6 @@ class IntervalsTimeline:
                 color=self.interval_under_mouse['classification'].color
             )
 
-        mouse_x, mouse_y = self.ei.last_known_mouse_location
-        row_bottom = self.shape_element_list.center_y
-        row_top = self.shape_element_list.center_y + self.timeline_row_height
-
         if detail_section_ref:
 
             def clear_my_interval_detail():
@@ -616,32 +641,8 @@ class IntervalsTimeline:
                         detail_section_ref.set_mouse_over_interval(None)
                     self.interval_under_mouse = None
 
-            # See if the mouse is over a timeline that shares something in common with us (e.g. namespace).
-            # if it does, render one or more yellow lines to indicate how much of a match we are.
-            mouse_over_intervals = detail_section_ref.mouse_over_intervals
-            if mouse_over_intervals is not None:
-                first_interval_of_mouse_over_intervals = mouse_over_intervals.iloc[0]
-                match_level = 0
-                for match_attr in ('namespace', 'pod', 'container', 'uid'):
-                    over_attr = IntervalAnalyzer.get_locator_key(first_interval_of_mouse_over_intervals, match_attr)
-                    if over_attr and IntervalAnalyzer.get_locator_key(self.first_interval_row, match_attr) == over_attr:
-                        match_level += 1
-                    else:
-                        break
-
-                for level in range(match_level):
-                    offset = level * 10 + 10
-                    arcade.draw_line(
-                        start_x=Layout.CATEGORY_BAR_RIGHT + offset,
-                        start_y=self.last_set_bottom + self.timeline_row_height / 2,
-                        end_x=Layout.CATEGORY_BAR_RIGHT + offset + 2,
-                        end_y=self.last_set_bottom + self.timeline_row_height / 2,
-                        line_width=self.timeline_row_height,
-                        color=arcade.color.YELLOW,
-                    )
-
             # See if the mouse is over this particular timeline row visualization
-            if mouse_y >= row_bottom and mouse_y < row_top:
+            if mouse_is_over_this_timeline:
 
                 # Draw the horizontal cross hair line
                 arcade.draw_line(
@@ -1414,7 +1415,7 @@ class MainWindow(arcade.Window):
             if self.current_view == self.import_timeline_view and symbol == arcade.key.ESCAPE and len(self.ei.timelines) > 0:
                 self.show_view(self.graph_view)
 
-            if symbol == arcade.key.I:
+            if symbol == arcade.key.I and self.current_view == self.graph_view:
                 self.show_view(self.import_timeline_view)
 
 

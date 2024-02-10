@@ -102,7 +102,7 @@ class ImportTimelineView(arcade.View):
             width=800,
             text=" ",
         )
-        self.url_ui_input.caret.visible = False
+        self.url_ui_input._active = True
         url_hbox.add(self.url_ui_input.with_background(input_field_bg).with_border(color=arcade.color.DARK_GRAY).with_space_around(top=20))
         self.v_box.add(url_hbox)
 
@@ -189,4 +189,7 @@ class ImportTimelineView(arcade.View):
             clipboard_data = pyperclip.paste()
 
             # Update the UIInputBox with clipboard data
-            self.url_ui_input.text = clipboard_data
+            self.url_ui_input.text += clipboard_data
+
+        if symbol == arcade.key.ENTER:
+            self.on_import_click(None)

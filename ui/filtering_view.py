@@ -243,6 +243,8 @@ class FilteringView(arcade.View):
         # Create a texture that can be used to fill in the input fields.
         input_field_bg = arcade.make_soft_square_texture(size=1000, color=(240, 240, 240), outer_alpha=255)
 
+        self.first_ui_input_field: Optional[arcade.gui.UIInputText] = None
+
         for filtering_field_name in ('Category', 'Classification', 'Namespace', 'Pod', 'UID', 'Message'):
             filter_field_hbox = gui.UIBoxLayout(vertical=False)
             field_label = arcade.gui.UILabel(
@@ -261,7 +263,12 @@ class FilteringView(arcade.View):
                 width=800,
                 text=" ",
             )
+            if self.first_ui_input_field is None:
+                # Make the first field ready to receive key stokes
+                self.first_ui_input_field = field_filter_ui_input
+
             field_filter_ui_input.caret.visible = False
+
             filter_field_hbox.add(field_filter_ui_input.with_background(input_field_bg).with_border(color=arcade.color.DARK_GRAY).with_space_around(top=20))
             self.or_fields_set.add_new_field_to_track(filtering_field_name, field_filter_ui_input)
             self.v_box.add(filter_field_hbox)
@@ -345,6 +352,8 @@ Complex Expression (do not mix with Simple):
     def on_show_view(self):
         self.manager.enable()
         self.on_resize(self.window.width, self.window.height)
+        if self.first_ui_input_field:
+            self.first_ui_input_field._active = True
         arcade.set_background_color(arcade.color.DARK_BLUE_GRAY)
 
     def on_hide_view(self):
@@ -352,3 +361,6 @@ Complex Expression (do not mix with Simple):
 
     def on_key_press(self, symbol: int, modifiers: int):
         self.window.on_key_press(symbol, modifiers)  # Pass key to window in case there are view changes desired
+
+        if symbol == arcade.key.ENTER:
+            self.on_apply_click(None)

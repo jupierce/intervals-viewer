@@ -204,12 +204,12 @@ class EventsInspector:
         """
         return timeline_width / self.current_zoom_timeline_seconds
 
-    def calculate_interval_width(self, timeline_width: int, pd_interval_row: pandas.Series) -> float:
+    def calculate_interval_pixel_width(self, timeline_width: int, pd_interval_row: pandas.Series) -> float:
         duration = pd_interval_row['duration']
-        return max(1.0, duration * self.calculate_pixels_per_second(timeline_width))
+        return max(3.0, duration * self.calculate_pixels_per_second(timeline_width))  # Give even the smallest interval several pixels to ensure it can be hovered over easily.
 
     def current_interval_width(self, pd_interval_row: pandas.Series) -> float:
-        return self.calculate_interval_width(
+        return self.calculate_interval_pixel_width(
             timeline_width=self.current_timeline_width,
             pd_interval_row=pd_interval_row
         )

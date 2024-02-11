@@ -631,8 +631,38 @@ class IntervalClassifications(Enum):
         color=arcade.color.AMETHYST
     )
 
-    AuditEventIdempotent = IntervalClassification(
-        display_name='Idempotent',
+    AuditEventGet = IntervalClassification(
+        display_name='Get',
+        category=IntervalCategories.AuditLog,
+        simple_interval_matcher=SimpleIntervalMatcher(
+            temp_source={'Event'},
+            locator_keys_match={'verb': 'get'}
+        ),
+        color=arcade.color.APPLE_GREEN
+    )
+
+    AuditEventList = IntervalClassification(
+        display_name='List',
+        category=IntervalCategories.AuditLog,
+        simple_interval_matcher=SimpleIntervalMatcher(
+            temp_source={'Event'},
+            locator_keys_match={'verb': 'list'}
+        ),
+        color=arcade.color.BOTTLE_GREEN
+    )
+
+    AuditEventWatch = IntervalClassification(
+        display_name='Watch',
+        category=IntervalCategories.AuditLog,
+        simple_interval_matcher=SimpleIntervalMatcher(
+            temp_source={'Event'},
+            locator_keys_match={'verb': 'watch'}
+        ),
+        color=arcade.color.BLUE_GREEN
+    )
+
+    AuditEventOther = IntervalClassification(
+        display_name='Other',
         category=IntervalCategories.AuditLog,
         simple_interval_matcher=SimpleIntervalMatcher(
             temp_source={'Event'},

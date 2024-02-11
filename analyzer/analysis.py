@@ -72,6 +72,7 @@ class EventsInspector:
         new_events = new_events.assign(to=lambda row: row['from'] + timedelta(seconds=1))
         new_events['tempStructuredLocator.keys.requestURI'] = new_events['requestURI']
         new_events['tempStructuredLocator.keys.auditID'] = new_events['auditID']
+        new_events['tempStructuredLocator.keys.verb'] = new_events['verb']
         new_events.rename(columns={
             'requestURI': 'locator',
             'kind': 'tempSource',

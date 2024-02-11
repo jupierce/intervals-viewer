@@ -88,7 +88,7 @@ class IntervalCategories(Enum):
     ClusterState = IntervalCategory('ClusterState')
     PodLog = IntervalCategory('PodLog')
 
-    AuditLog = IntervalCategory('AuditLog')
+    AuditLog = IntervalCategory('AuditLog', order_timelines_by_earliest_from=True)
 
 
 
@@ -109,6 +109,8 @@ class SimpleIntervalMatcher:
     identifying values for attributes which must be set (and to what values, if desired).
     """
     def __init__(self, temp_source: OptionalSingleStrOrSet = None,
+                 full_column_name_exist: Optional[Set[str]] = None,
+                 full_column_name_match: Optional[Dict[str, str]] = None,
                  locator_type: OptionalSingleStrOrSet = None,
                  locator_keys_exist: Optional[Set[str]] = None,
                  locator_keys_match: Optional[Dict[str, str]] = None,
@@ -142,6 +144,8 @@ class SimpleIntervalMatcher:
 
         and_exprs.append('classification.isnull()')  # Only set classification if nothing has already set it.
         add__and_equal('tempSource', temp_source)
+        add__and_not_null(full_column_name_exist)
+        add__and_all_equal(full_column_name_match)
         add__and_equal('type', locator_type, IntervalAnalyzer.STRUCTURED_LOCATOR_PREFIX)
         add__and_not_null(locator_keys_exist, IntervalAnalyzer.STRUCTURED_LOCATOR_KEY_PREFIX)
         add__and_all_equal(locator_keys_match, IntervalAnalyzer.STRUCTURED_LOCATOR_KEY_PREFIX)
@@ -597,8 +601,38 @@ class IntervalClassifications(Enum):
         )
     )
 
-    AuditEvent = IntervalClassification(
-        display_name='AuditEvent',
+    AuditEventDelete = IntervalClassification(
+        display_name='Delete',
+        category=IntervalCategories.AuditLog,
+        simple_interval_matcher=SimpleIntervalMatcher(
+            temp_source={'Event'},
+            locator_keys_match={'verb': 'delete'}
+        ),
+        color=arcade.color.PALE_CERULEAN
+    )
+
+    AuditEventPatch = IntervalClassification(
+        display_name='Patch',
+        category=IntervalCategories.AuditLog,
+        simple_interval_matcher=SimpleIntervalMatcher(
+            temp_source={'Event'},
+            locator_keys_match={'verb': 'patch'}
+        ),
+        color=arcade.color.PINK
+    )
+
+    AuditEventPost = IntervalClassification(
+        display_name='Post',
+        category=IntervalCategories.AuditLog,
+        simple_interval_matcher=SimpleIntervalMatcher(
+            temp_source={'Event'},
+            locator_keys_match={'verb': 'post'}
+        ),
+        color=arcade.color.AMETHYST
+    )
+
+    AuditEventIdempotent = IntervalClassification(
+        display_name='Idempotent',
         category=IntervalCategories.AuditLog,
         simple_interval_matcher=SimpleIntervalMatcher(
             temp_source={'Event'},

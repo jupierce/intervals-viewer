@@ -488,6 +488,7 @@ class IntervalsTimeline:
 
     def __init__(self, graph_section: arcade.Section,
                  ei: EventsInspector,
+                 group_id: Tuple,
                  pd_interval_rows: pd.DataFrame,
                  timeline_row_width: int,
                  timeline_row_height: int):
@@ -498,6 +499,7 @@ class IntervalsTimeline:
         self.graph_section = graph_section
         self.window = self.graph_section.window
         self.ei = ei
+        self.group_id = group_id
         self.pd_interval_rows = pd_interval_rows
 
         # Image to container rendered timeline WITHOUT any mouse over
@@ -971,6 +973,7 @@ class GraphSection(arcade.Section):
         interval_timeline = IntervalsTimeline(
             graph_section=self,
             ei=self.ei,
+            group_id=group_id,
             pd_interval_rows=intervals_for_row_df,
             timeline_row_height=timeline_row_height,
             timeline_row_width=timeline_row_width
@@ -1004,40 +1007,12 @@ class GraphSection(arcade.Section):
         self.scroll_down_by_rows(-1 * int(scroll_y // 2))
 
     def zoom_to_dates(self, start: datetime.datetime, end: datetime.datetime,  refilter_based_on_date_range: bool = False):
-        first_timeline_id = None
-        previous_first_category = None
-        if self.first_visible_interval_timeline:
-            # The user has zoomed with this row as the top of their view.
-            previous_first_category = self.first_visible_interval_timeline.get_category_name()
-            first_timeline_id = self.first_visible_interval_timeline.get_timeline_id()
+        # Store our scroll position prior to the zoom
+        previous_scroll_position = self.scroll_y_rows
 
         self.ei.zoom_to_dates(start, end, refilter_based_on_date_range)
 
-        # If we find a good match, we scroll to that new location in the timeline rows.
-        target_for_scroll: Optional[int] = None  # if we can't find anything close, scroll back to the top
-        if first_timeline_id is not None:
-            # When someone zooms, some timelines might disappear from the selection (because they do not
-            # have active intervals within the selected date ranges). If enough disappear, the position of the
-            # old scroll location may be well away from the old visible rows -- which can be disorienting
-            # because the user no longer sees the old visible patterns. To account for this, when they scroll,
-            # we search for a category/locator pair that is closest to what the top row used to be before
-            # the scroll.
-            timeline_number = 0
-            for row_id_tuple in self.ei.timelines.keys():
-                # Intervals are grouped by category, and then timeline_id. So a group
-                # key will be a tuple (category, timeline_id).
-                row_category, row_timeline_id = row_id_tuple
-                if row_category >= previous_first_category and row_timeline_id >= first_timeline_id:
-                    target_for_scroll = timeline_number
-                    break
-                timeline_number += 1
-
-        if target_for_scroll is not None:
-            self.scroll_y_rows = target_for_scroll
-        else:
-            self.scroll_down_by_rows(-1)
-
-        self.update_scroll_bars()
+        self.scroll_y_rows = previous_scroll_position
 
     def process_keys_down(self, delay_until_next: Optional[float] = None):
         """

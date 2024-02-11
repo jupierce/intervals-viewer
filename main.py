@@ -158,7 +158,8 @@ class DetailSection(arcade.Section):
         from_dt = self.mouse_from_time_dt
         dt = self.mouse_over_time_dt
 
-        text = f'Mouse[ ({dt}) {self.ei.last_known_mouse_location}'
+        dt_str = dt.strftime("%Y-%m-%d %H:%M:%S.%f")
+        text = f'Mouse[ ({dt_str}) {self.ei.last_known_mouse_location}'
         # from_dt is passed in if there is a mouse dragging operation. The click before the
         # drag began is used to calculate a time offset for the initial mouse position.
         if from_dt:
@@ -534,7 +535,7 @@ class IntervalsTimeline:
         self.shape_element_list.append(background_line)
 
         # pd_interval_rows contains a list of intervals specific to this timeline.
-        # iterate through them all and draw the relevant pixels into the image buffer.
+        # iterate through them all and draw the relevant lines in a shape element list.
         for _, interval_row in self.pd_interval_rows.iterrows():
             interval_line_start_x, interval_line_end_x = self.get_interval_extents(interval_row)
 

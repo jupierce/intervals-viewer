@@ -141,6 +141,7 @@ class ImportTimelineView(arcade.View):
         super().on_resize(window_width, window_height)
 
     def on_show(self):
+        self.url_ui_input.text = ''
         self.status_area.text = ImportTimelineView.INIT_STATUS_MESSAGE
 
     def check_download(self, download_thread: threading.Thread, status_lock: threading.Lock, status: DownloadStatus):

@@ -254,6 +254,6 @@ class EventsInspector:
         the location approximating?
         :param left_offset: distance in pixels from the start of the zoom timeline.
         """
-        return self.zoom_timeline_start + timedelta(seconds=int(left_offset / self.current_pixels_per_second_in_timeline))
+        return self.zoom_timeline_start + timedelta(microseconds=int(left_offset / self.current_pixels_per_second_in_timeline * 1000000))
 
 

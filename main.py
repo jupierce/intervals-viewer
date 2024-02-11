@@ -1012,6 +1012,8 @@ class GraphSection(arcade.Section):
 
         self.ei.zoom_to_dates(start, end, refilter_based_on_date_range)
 
+        # It should be noted that if refilter_based_on_date_range is True (i.e. Collapse), then the number of timelines may be reduced
+        # significantly. In that, case, the old offset into the list is potentially meaningless.
         self.scroll_y_rows = previous_scroll_position
 
     def process_keys_down(self, delay_until_next: Optional[float] = None):

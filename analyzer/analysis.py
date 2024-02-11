@@ -143,12 +143,12 @@ class EventsInspector:
 
         # This is tricky. We could collect up the dataframes associated with each timeline
         # with a simple df.groupby(['category_str', 'timeline_id']). However, when viewing the
-        # timelines on the screen, we want sometimes want the order of the timelines WITHIN A GROUP to be
+        # timelines on the screen, we sometimes want the order of the timelines WITHIN A GROUP to be
         # ordered by the earliest interval in that timeline. For e2etests, for example,
         # it ensures that a visualization that looks like a waterfall of ordered test executions
         # vertically, vs the random row ordering we would have otherwise.
         # For other groups, we want the timelines to be displayed in 'locator' order so that
-        # activities in namespaces/pods/containers are sequential.
+        # activities in namespaces/pods/containers are grouped visually.
         category_groups = filtered_df.groupby('category_str')
         self.timelines = OrderedDict()
         for category_key, category_timelines_data in category_groups:

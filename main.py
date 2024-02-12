@@ -4,6 +4,11 @@ from functools import lru_cache
 import pandas as pd
 import json
 import arcade
+import os
+
+import tarfile
+import gzip
+from io import BytesIO
 
 from typing import Optional, List, Tuple, Dict, Set, Iterable
 
@@ -1367,6 +1372,26 @@ class MainWindow(arcade.Window):
         if url.endswith('.json'):
             intervals_list = json.load(stream_handle)['items']
             self.ei.add_interval_dicts(intervals_list)
+        elif url.endswith('.tar'):
+            with tarfile.open(fileobj=stream_handle, mode="r") as tar:
+                # Iterate through files in the tar archive
+                for member in tar.getmembers():
+                    # Read the content of the file
+                    print(f'Reading tar file member: {member.path}')
+                    if 'audit' in os.path.basename(member.name) and (member.name.endswith('.log') or member.name.endswith('.gz')):
+                        file_content = tar.extractfile(member).read()
+
+                        # Check if the file has a .gz extension
+                        if member.name.endswith('.gz'):
+                            # If yes, decompress the content
+                            with gzip.GzipFile(fileobj=BytesIO(file_content), mode='rb') as gz:
+                                file_content = gz.read()
+
+                        # Call the method with filename and content
+                        try:
+                            self.ei.add_logs_data(BytesIO(file_content))
+                        except:
+                            print(f'Error loading tar entry: {member.name}')
         else:
             self.ei.add_logs_data(stream_handle)
         self.graph_view = GraphInterfaceView(self.ei, self)

@@ -975,7 +975,7 @@ class GraphSection(arcade.Section):
         :param timeline_row_height: The on-screen height (px), the timeline row should occupy when rendered.
         :return: IntervalsTimeline capable of drawing the timeline on screen.
         """
-        intervals_for_row_df: pd.DataFrame = self.ei.timelines[group_id]
+        intervals_for_row_df: pd.DataFrame = self.ei.selected_timelines[group_id]
         interval_timeline = IntervalsTimeline(
             graph_section=self,
             ei=self.ei,
@@ -1002,7 +1002,7 @@ class GraphSection(arcade.Section):
         self.vertical_scroll_bar.on_scrolling_change(
             current_scrolled_y_rows=self.scroll_y_rows,
             current_rows_per_page=self.calc_rows_to_display(),
-            available_row_count=len(self.ei.timelines)
+            available_row_count=len(self.ei.selected_timelines)
         )
         self.horizontal_scroll_bar.on_scrolling_change()
 
@@ -1032,7 +1032,7 @@ class GraphSection(arcade.Section):
             self.scroll_y_rows = 0
 
         if arcade.key.END in self.keys_down:
-            self.scroll_y_rows = len(self.ei.timelines.keys())
+            self.scroll_y_rows = len(self.ei.selected_timelines.keys())
 
         if arcade.key.R in self.keys_down:
             self.zoom_to_dates(self.ei.absolute_timeline_start, self.ei.absolute_timeline_stop, refilter_based_on_date_range=True)
@@ -1132,7 +1132,7 @@ class GraphSection(arcade.Section):
         # If the minimum height of each row is ?px, then figure out how
         # many we can fit in the graph area.
         rows_to_display = self.calc_rows_to_display()
-        available_timelines_ids = list(self.ei.timelines.keys())
+        available_timelines_ids = list(self.ei.selected_timelines.keys())
 
         # If the user has hit END or scrolled to the end of the data, show the last full page
         if self.scroll_y_rows > len(available_timelines_ids) - self.calc_rows_to_display():
@@ -1236,7 +1236,7 @@ class GraphSection(arcade.Section):
         """
         Trigger a vertical scroll based on a y position on the window.
         """
-        rows = int((len(self.ei.timelines) - self.calc_rows_to_display() + 2) * self.vertical_scroll_bar.get_percent_scroll(y))
+        rows = int((len(self.ei.selected_timelines) - self.calc_rows_to_display() + 2) * self.vertical_scroll_bar.get_percent_scroll(y))
         self.scroll_y_rows = rows
 
     def track_scroll_x(self, x: int):
@@ -1406,7 +1406,7 @@ class MainWindow(arcade.Window):
             if self.current_view == self.filter_view and symbol == arcade.key.ESCAPE:
                 self.show_view(self.graph_view)
 
-            if self.current_view == self.import_timeline_view and symbol == arcade.key.ESCAPE and len(self.ei.timelines) > 0:
+            if self.current_view == self.import_timeline_view and symbol == arcade.key.ESCAPE and len(self.ei.selected_timelines) > 0:
                 self.show_view(self.graph_view)
 
             if symbol == arcade.key.I and self.current_view == self.graph_view:

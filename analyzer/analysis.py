@@ -44,6 +44,8 @@ class EventsInspector:
         self.absolute_timeline_stop: pd.Timestamp = pd.Timestamp.now() + timedelta(minutes=60)
         self.zoom_timeline_start: pd.Timestamp = self.absolute_timeline_start
         self.zoom_timeline_stop: pd.Timestamp = self.absolute_timeline_stop
+
+        # Contains the filtered intervals of the pandas dataframe.
         self.selected_rows = self.events_df
 
         # The number of horizontal pixels available to draw each timeline row
@@ -52,10 +54,13 @@ class EventsInspector:
         # The number of seconds each time is expected to represent
         self.current_zoom_timeline_seconds: Optional[float] = 1
 
+        # Stores all timelines from all available pandas data.
+        self.all_timelines: OrderedDict[Any, pd.DataFrame] = OrderedDict()
+
         # Will store the currently selected rows, grouped by a tuple key (category, timeline_id).
         # Each group is, in effective, all the intervals that should be rendered for a
         # timeline row.
-        self.timelines: Dict[Any, pd.DataFrame] = dict()
+        self.selected_timelines: OrderedDict[Any, pd.DataFrame] = dict()
 
         self.details: Details = Details(self)
         self.last_filter_query: Optional[str] = None
@@ -131,16 +136,14 @@ class EventsInspector:
         self.zoom_timeline_stop: pd.Timestamp = self.absolute_timeline_stop
         self.selected_rows = self.events_df
 
+        self.rebuild_all_timelines()
         self.set_filter_query(self.last_filter_query)  # Re-apply the filter to apply to combined data
-        self.select_timelines_active_in_range()
 
-    def select_timelines_active_in_range(self):
+    def rebuild_all_timelines(self):
         """
-        Call whenever the selected rows have been modified
+        Call whenever the pandas intervals have changed (e.g. new data) - meaning there are
+        potentially new timeline groups to create / a new order in which to display them.
         """
-        df = self.selected_rows
-        filtered_df = df[(df['to'] >= self.zoom_timeline_start) & (df['from'] <= self.zoom_timeline_stop)]
-
         # This is tricky. We could collect up the dataframes associated with each timeline
         # with a simple df.groupby(['category_str', 'timeline_id']). However, when viewing the
         # timelines on the screen, we sometimes want the order of the timelines WITHIN A GROUP to be
@@ -149,8 +152,8 @@ class EventsInspector:
         # vertically, vs the random row ordering we would have otherwise.
         # For other groups, we want the timelines to be displayed in 'locator' order so that
         # activities in namespaces/pods/containers are grouped visually.
-        category_groups = filtered_df.groupby('category_str')
-        self.timelines = OrderedDict()
+        category_groups = self.events_df.groupby('category_str')
+        self.all_timelines = OrderedDict()
         for category_key, category_timelines_data in category_groups:
             category: IntervalCategory = category_timelines_data.iloc[0]['category']
             timelines_by_category: Dict[Any, pd.DataFrame] = category_timelines_data.groupby('timeline_id')
@@ -159,7 +162,17 @@ class EventsInspector:
             if category.order_timelines_by_earliest_from:
                 ordered_timelines = sorted(timelines_to_order, key=lambda key_df: key_df[1]['from'].min())
             for key, timeline in ordered_timelines:
-                self.timelines[(category_key, key,)] = timeline
+                self.all_timelines[(category_key, key,)] = timeline
+
+    def rebuild_selected_timelines_with(self, selected_rows):
+        """
+        Populated self.timelines with timelines including data from the selected rows.
+        """
+        grouped = selected_rows.groupby(['category_str', 'timeline_id'])  # Find all timeline_id tuples for which we should retain data.
+        self.selected_timelines = OrderedDict()
+        for key, pd_intervals in self.all_timelines.items():
+            if key in grouped.groups.keys():
+                self.selected_timelines[key] = pd_intervals
 
     def set_filter_query(self, query: Optional[str] = None):
         if query:
@@ -171,13 +184,28 @@ class EventsInspector:
         else:
             self.selected_rows = self.events_df
         self.last_filter_query = query
-        self.select_timelines_active_in_range()
+        self.rebuild_selected_timelines_with(self.selected_rows)
 
     def on_zoom_resize(self, timeline_width):
         self.current_timeline_width = timeline_width
         # Number of seconds which must be displayed in the timeline
         self.current_zoom_timeline_seconds = seconds_between(self.zoom_timeline_start, self.zoom_timeline_stop)
         self.current_pixels_per_second_in_timeline: float = self.calculate_pixels_per_second(self.current_timeline_width)
+
+    def apply_collapse_filter(self):
+        """
+        Reduces selected rows to timelines which have an interval active in the current zoom time window.
+        """
+        df = self.selected_rows
+        filtered_df = df[(df['to'] >= self.zoom_timeline_start) & (df['from'] <= self.zoom_timeline_stop)]
+        # Group the intervals which were detected. Each group key represents a timeline id whose data
+        # should be retained. We retain all the intervals in the selected timelines because we will need
+        # that data if the user scrolls left or right in the resulting view.
+        grouped = filtered_df.groupby(['category_str', 'timeline_id'])
+        self.selected_timelines = OrderedDict()
+        for key, pd_intervals in self.all_timelines.items():
+            if key in grouped.groups.keys():
+                self.selected_timelines[key] = pd_intervals
 
     def zoom_to_dates(self, from_dt: datetime, to_dt: datetime, refilter_based_on_date_range=False):
 
@@ -207,7 +235,7 @@ class EventsInspector:
         self.zoom_timeline_start = from_dt
         self.zoom_timeline_stop = to_dt
         if refilter_based_on_date_range:
-            self.select_timelines_active_in_range()
+            self.apply_collapse_filter()
         self.on_zoom_resize(self.current_timeline_width)
 
     def get_current_timeline_width(self):

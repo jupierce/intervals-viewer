@@ -1,4 +1,10 @@
 import datetime
+import os
+import tempfile
+import tarfile
+import gzip
+import shutil
+
 from typing import Optional, Dict
 
 import arcade
@@ -141,4 +147,36 @@ def prioritized_sort(entry):
     # Return a tuple with two elements - the first is the subset order or a high value
     # if the word is not in the subset, and the second is the word itself
     return (required_subset_ordering.get(entry, float('inf')), entry)
+
+
+def extract_and_process_tar(handle, process_function):
+    # Create a temporary directory
+    temp_dir = tempfile.mkdtemp(dir=os.getcwd(), prefix='extract.intervals-viewer.tmp')
+
+    try:
+        # Extract the tar file to the temporary directory
+        with tarfile.open(fileobj=handle, mode='r') as tar:
+            tar.extractall(temp_dir)
+
+        # Iterate through the files in the temporary directory
+        for root, _, files in os.walk(temp_dir):
+            for file_name in files:
+                file_path = os.path.join(root, file_name)
+
+                # Check if the file has a .gz extension
+                if file_name.endswith('.gz'):
+                    # Decompress the .gz file
+                    with gzip.open(file_path, 'rb') as gz_file:
+                        decompressed_content = gz_file.read()
+                    with open(file_path[:-3], 'wb') as decompressed_file:
+                        decompressed_file.write(decompressed_content)
+                    os.remove(file_path)
+                    file_path = file_path[:-3]
+
+                # Call the provided function with the temporary directory
+                process_function(file_path)
+
+    finally:
+        # Recursively delete the temporary directory
+        shutil.rmtree(temp_dir)
 

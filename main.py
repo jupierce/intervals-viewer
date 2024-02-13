@@ -16,6 +16,7 @@ from analyzer import SimpleRect, EventsInspector, humanize_timedelta
 from analyzer.intervals import IntervalAnalyzer, IntervalCategories, IntervalClassification, IntervalClassifications
 from ui import FilteringView, ImportTimelineView
 from ui.layout import Theme, Layout
+from analyzer.util import extract_and_process_tar
 
 INIT_SCREEN_WIDTH = 500
 INIT_SCREEN_HEIGHT = 500
@@ -1373,25 +1374,12 @@ class MainWindow(arcade.Window):
             intervals_list = json.load(stream_handle)['items']
             self.ei.add_interval_dicts(intervals_list)
         elif url.endswith('.tar'):
-            with tarfile.open(fileobj=stream_handle, mode="r") as tar:
-                # Iterate through files in the tar archive
-                for member in tar.getmembers():
-                    # Read the content of the file
-                    print(f'Reading tar file member: {member.path}')
-                    if 'audit' in os.path.basename(member.name) and (member.name.endswith('.log') or member.name.endswith('.gz')):
-                        file_content = tar.extractfile(member).read()
-
-                        # Check if the file has a .gz extension
-                        if member.name.endswith('.gz'):
-                            # If yes, decompress the content
-                            with gzip.GzipFile(fileobj=BytesIO(file_content), mode='rb') as gz:
-                                file_content = gz.read()
-
-                        # Call the method with filename and content
-                        try:
-                            self.ei.add_logs_data(BytesIO(file_content))
-                        except:
-                            print(f'Error loading tar entry: {member.name}')
+            def process_extracted_tar_file_entry(file_path: str):
+                if 'audit' in os.path.basename(file_path) and file_path.endswith('.log'):
+                    print(f'Processing: {file_path}')
+                    with open(file_path, mode='r') as audit_log_fp:
+                        self.ei.add_logs_data(audit_log_fp)
+            extract_and_process_tar(stream_handle, process_extracted_tar_file_entry)
         else:
             self.ei.add_logs_data(stream_handle)
         self.graph_view = GraphInterfaceView(self.ei, self)

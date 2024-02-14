@@ -921,6 +921,7 @@ class GraphSection(arcade.Section):
 
     def __init__(self, ei: EventsInspector, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.fps = 0
         self.ei = ei
         self.color_legend_bar = ColorLegendBar(self, ei)
         self.zoom_date_range_display_bar = ZoomDateRangeDisplayBar(self, ei)
@@ -1218,6 +1219,7 @@ class GraphSection(arcade.Section):
         self.vertical_scroll_bar.draw()
         self.horizontal_scroll_bar.draw()
         self.category_bar.draw_categories(category_label_row_count, row_height_px=self.row_height_px)
+        arcade.draw_text(f"FPS: {int(self.fps)}", self.category_bar.right + 2, self.horizontal_scroll_bar.top + 12, arcade.color.WHITE, 10)
 
     def on_mouse_leave(self, x: int, y: int):
         self.mouse_over_timeline_area = False
@@ -1303,6 +1305,7 @@ class GraphSection(arcade.Section):
             detail_section_ref.set_mouse_over_time(self.ei.left_offset_to_datetime(self.mouse_timeline_area_offset_x), from_dt)
 
     def on_update(self, delta_time: float):
+        self.fps = 1 / delta_time
         self.time_until_next_process_keys_down -= delta_time
         if self.time_until_next_process_keys_down < 0:
             self.process_keys_down()

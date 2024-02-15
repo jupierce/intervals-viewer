@@ -1156,6 +1156,7 @@ class GraphSection(arcade.Section):
         self.vertical_scroll_bar.on_resize()
         self.horizontal_scroll_bar.on_resize()
         self.update_scroll_bars()  # Trigger a scroll bar handle re-calculation
+        self.buffered_graph = None
 
     def calc_rows_to_display(self) -> int:
         """
@@ -1163,7 +1164,7 @@ class GraphSection(arcade.Section):
         """
         return self.category_bar.height // self.row_height_px
 
-    @lru_cache(maxsize=1)  # Abuses lru_cache in order to only set center_x when things change.
+    @lru_cache(maxsize=1)  # Lazy abuse of lru_cache in order to only set center_x when things change.
     def set_buffered_graph_center_x(self, absolute_timeline_start, zoom_timeline_start, pixels_per_second):
         self.buffered_graph.center_x = -1 * left_offset_from_datetime(baseline_dt=absolute_timeline_start, position_dt=zoom_timeline_start, pixels_per_second=pixels_per_second)
 

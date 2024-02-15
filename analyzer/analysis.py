@@ -23,8 +23,38 @@ def seconds_between(pd_datetime_from: pandas.Timestamp, pd_datatime_to:pandas.Ti
         return 0.0
 
 
+def left_offset_from_datetime(baseline_dt: pd.Timestamp, position_dt: pd.Timestamp, pixels_per_second: float) -> float:
+    """
+    Given two timestamps (from, to), calculate the number of pixels which would represent the visual spacing
+    between the two times.
+    Args:
+        baseline_dt: Baseline time.
+        position_dt: Time to assess offset from baseline.
+        pixels_per_second: The number of pixels per second presently represented on the screen (may be <1.0)
+    """
+    return seconds_between(baseline_dt, position_dt) * pixels_per_second
+
+
+def left_offset_to_datetime(baseline_dt: pd.Timestamp, left_offset_px: float, pixels_per_second: float) -> datetime:
+    """
+    Given a baseline datetime, determine what datetime is represented by a pixel offset from that baseline.
+    Args:
+        baseline_dt: The baseline datetime.
+        left_offset_px: The number of pixels away the date to determine is from that baseline.
+        pixels_per_second: The number of pixels per second presently represented on the screen (may be <1.0)
+    Returns:
+        An approximate datetime that the pixel offset represents.
+    """
+    return baseline_dt + timedelta(microseconds=int(left_offset_px / pixels_per_second * 1000000))
+
+
 def get_interval_duration(row: pd.Series):
     return seconds_between(row['from'], row['to'])
+
+
+def get_interval_width_px(pd_interval_row: pandas.Series, pixels_per_second: float) -> float:
+    duration = pd_interval_row['duration']
+    return max(3.0, duration * pixels_per_second)  # Give even the smallest interval several pixels to ensure it can be hovered over easily.
 
 
 class Details:
@@ -262,30 +292,10 @@ class EventsInspector:
             pd_interval_row=pd_interval_row
         )
 
-    def calculate_left_offset(self, timeline_width: int, pd_interval_row: pandas.Series) -> float:
-        from_dt = pd_interval_row['from']
-        if self.zoom_timeline_start > from_dt:
-            from_dt = self.zoom_timeline_start
-        return seconds_between(self.zoom_timeline_start, from_dt) * self.calculate_pixels_per_second(timeline_width)
-
-    def current_interval_left_offset(self, pd_interval_row: pandas.Series) -> float:
-        """
-        How far from the left side of the beginning of the zoom timeline should the
-        interval begin to render.
-        :param pd_interval_row: A row indicating an interval
-        """
-        return seconds_between(self.zoom_timeline_start, pd_interval_row['from']) * self.current_pixels_per_second_in_timeline
-
-    def left_offset_from_datetime(self, timeline_start: pd.Timestamp, position_dt: pd.Timestamp, timeline_width: int) -> float:
-        return seconds_between(timeline_start, position_dt) * self.calculate_pixels_per_second(
-            timeline_width)
-
-    def left_offset_to_datetime(self, left_offset) -> datetime:
+    def zoom_left_offset_to_datetime(self, left_offset_px) -> datetime:
         """
         Given an offset from the left side of the zoom timeline, what datetime is
         the location approximating?
-        :param left_offset: distance in pixels from the start of the zoom timeline.
+        :param left_offset_px: distance in pixels from the start of the zoom timeline.
         """
-        return self.zoom_timeline_start + timedelta(microseconds=int(left_offset / self.current_pixels_per_second_in_timeline * 1000000))
-
-
+        return left_offset_to_datetime(self.zoom_timeline_start, left_offset_px, pixels_per_second=self.current_pixels_per_second_in_timeline)

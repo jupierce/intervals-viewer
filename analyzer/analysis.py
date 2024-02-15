@@ -92,6 +92,7 @@ class EventsInspector:
         # Each group is, in effective, all the intervals that should be rendered for a
         # timeline row.
         self.selected_timelines: OrderedDict[Any, pd.DataFrame] = dict()
+        self.selected_timeline_keys: List[Tuple] = list()  # keeps an ordered list of timeline keys (same order that exist in self.selected_timelines
 
         self.details: Details = Details(self)
         self.last_filter_query: Optional[str] = None
@@ -206,6 +207,7 @@ class EventsInspector:
         for key, pd_intervals in self.all_timelines.items():
             if key in grouped.groups.keys():
                 self.selected_timelines[key] = pd_intervals
+        self.update_selected_timeline_keys()
 
     def set_filter_query(self, query: Optional[str] = None):
         if query:
@@ -239,6 +241,10 @@ class EventsInspector:
         for key, pd_intervals in self.all_timelines.items():
             if key in grouped.groups.keys():
                 self.selected_timelines[key] = pd_intervals
+        self.update_selected_timeline_keys()
+
+    def update_selected_timeline_keys(self):
+        self.selected_timeline_keys = list(self.selected_timelines.keys())
 
     def zoom_to_dates(self, from_dt: datetime, to_dt: datetime, refilter_based_on_date_range=False):
 

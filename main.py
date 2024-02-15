@@ -941,7 +941,10 @@ class GraphSection(arcade.Section):
         super().__init__(*args, **kwargs)
 
         # Will contain a list of all rectangles to render in the current
-        # visualization of selected / visible timelines.
+        # visualization of selected / visible timelines. This includes rectangles
+        # that are not presently displayed because of the zoom range
+        # (e.g. scrolling left or right should not necessitate rebuilding this
+        # list).
         self.buffered_graph: Optional[arcade.ShapeElementList] = None
 
         self.fps = 0
@@ -1160,6 +1163,10 @@ class GraphSection(arcade.Section):
         """
         return self.category_bar.height // self.row_height_px
 
+    @lru_cache(maxsize=1)  # Abuses lru_cache in order to only set center_x when things change.
+    def set_buffered_graph_center_x(self, absolute_timeline_start, zoom_timeline_start, pixels_per_second):
+        self.buffered_graph.center_x = -1 * left_offset_from_datetime(baseline_dt=absolute_timeline_start, position_dt=zoom_timeline_start, pixels_per_second=pixels_per_second)
+
     def on_draw(self):
         arcade.draw_lrtb_rectangle_filled(  # Clear the section
             left=self.left,
@@ -1234,9 +1241,8 @@ class GraphSection(arcade.Section):
                 visual_row_number += 1
             self.buffered_graph.append(arcade.create_rectangles_filled_with_colors(rect_points, colors))
 
-        self.buffered_graph.center_x = -1 * left_offset_from_datetime(baseline_dt=self.ei.absolute_timeline_start, position_dt=self.ei.zoom_timeline_start, pixels_per_second=self.ei.current_pixels_per_second_in_timeline)
+        self.set_buffered_graph_center_x(self.ei.absolute_timeline_start, self.ei.zoom_timeline_start, self.ei.current_pixels_per_second_in_timeline)
         self.buffered_graph.draw()
-        # arcade.create_rectangles_filled_with_colors([(0, 1000), (1000,1000), (1000,0), (0,0)], [arcade.color.RED, arcade.color.GREEN, arcade.color.BLUE, arcade.color.WHITE]).draw()
 
         if arcade.MOUSE_BUTTON_LEFT in self.mouse_button_down and \
                 arcade.MOUSE_BUTTON_LEFT in self.mouse_button_active_drag:

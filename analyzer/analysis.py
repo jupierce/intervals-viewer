@@ -1,4 +1,5 @@
 import arcade
+import numpy as np
 import pandas
 import pandas as pd
 import traceback
@@ -125,18 +126,15 @@ class EventsInspector:
     def add_intervals(self, new_events: pandas.DataFrame):
         self.events_df = pd.concat([self.events_df, new_events], ignore_index=True, sort=False)
 
-        # Reassess the data for max/min
-        self.absolute_timeline_start: pd.Timestamp = (self.events_df['from'].min()).floor('min')  # Get the earliest interval start and round down to nearest minute
-        self.absolute_timeline_stop: pd.Timestamp = (self.events_df['to'].max()).ceil('min')
-
         # Order rows by category, timeline, then make sure all rows are in chronological order by start time
         self.events_df = self.events_df.sort_values(['category_str', 'timeline_id', 'from'], ascending=True)
+
+        self.rebuild_all_timelines()
 
         self.zoom_timeline_start: pd.Timestamp = self.absolute_timeline_start
         self.zoom_timeline_stop: pd.Timestamp = self.absolute_timeline_stop
         self.selected_rows = self.events_df
 
-        self.rebuild_all_timelines()
         self.set_filter_query(self.last_filter_query)  # Re-apply the filter to apply to combined data
 
     def rebuild_all_timelines(self):
@@ -144,6 +142,11 @@ class EventsInspector:
         Call whenever the pandas intervals have changed (e.g. new data) - meaning there are
         potentially new timeline groups to create / a new order in which to display them.
         """
+
+        # Reassess the data for max/min
+        self.absolute_timeline_start: pd.Timestamp = (self.events_df['from'].min()).floor('min')  # Get the earliest interval start and round down to nearest minute
+        self.absolute_timeline_stop: pd.Timestamp = (self.events_df['to'].max()).ceil('min')
+
         # This is tricky. We could collect up the dataframes associated with each timeline
         # with a simple df.groupby(['category_str', 'timeline_id']). However, when viewing the
         # timelines on the screen, we sometimes want the order of the timelines WITHIN A GROUP to be
@@ -186,8 +189,8 @@ class EventsInspector:
         self.last_filter_query = query
         self.rebuild_selected_timelines_with(self.selected_rows)
 
-    def on_zoom_resize(self, timeline_width):
-        self.current_timeline_width = timeline_width
+    def on_zoom_resize(self, timeline_width_px):
+        self.current_timeline_width = timeline_width_px
         # Number of seconds which must be displayed in the timeline
         self.current_zoom_timeline_seconds = seconds_between(self.zoom_timeline_start, self.zoom_timeline_stop)
         self.current_pixels_per_second_in_timeline: float = self.calculate_pixels_per_second(self.current_timeline_width)

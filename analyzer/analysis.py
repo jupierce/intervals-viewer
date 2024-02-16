@@ -73,6 +73,7 @@ class EventsInspector:
         # No data yet, so setup arbitrary start and stop for absolute timeline extents
         self.absolute_timeline_start: pd.Timestamp = pd.Timestamp.now()
         self.absolute_timeline_stop: pd.Timestamp = pd.Timestamp.now() + timedelta(minutes=60)
+        self.absolute_duration = 0
         self.zoom_timeline_start: pd.Timestamp = self.absolute_timeline_start
         self.zoom_timeline_stop: pd.Timestamp = self.absolute_timeline_stop
 
@@ -80,7 +81,7 @@ class EventsInspector:
         self.selected_rows = self.events_df
 
         # The number of horizontal pixels available to draw each timeline row
-        self.current_timeline_width = 0
+        self.current_visible_timeline_width = 0
         self.current_pixels_per_second_in_timeline = 0
         # The number of seconds each time is expected to represent
         self.current_zoom_timeline_seconds: Optional[float] = 1
@@ -177,6 +178,7 @@ class EventsInspector:
         # Reassess the data for max/min
         self.absolute_timeline_start: pd.Timestamp = (self.events_df['from'].min()).floor('min')  # Get the earliest interval start and round down to nearest minute
         self.absolute_timeline_stop: pd.Timestamp = (self.events_df['to'].max()).ceil('min')
+        self.absolute_duration = seconds_between(self.absolute_timeline_start, self.absolute_timeline_stop)
 
         # This is tricky. We could collect up the dataframes associated with each timeline
         # with a simple df.groupby(['category_str', 'timeline_id']). However, when viewing the
@@ -221,11 +223,11 @@ class EventsInspector:
         self.last_filter_query = query
         self.rebuild_selected_timelines_with(self.selected_rows)
 
-    def on_zoom_resize(self, timeline_width_px):
-        self.current_timeline_width = timeline_width_px
+    def on_zoom_resize(self, visible_timeline_width_px):
+        self.current_visible_timeline_width = visible_timeline_width_px
         # Number of seconds which must be displayed in the timeline
         self.current_zoom_timeline_seconds = seconds_between(self.zoom_timeline_start, self.zoom_timeline_stop)
-        self.current_pixels_per_second_in_timeline: float = self.calculate_pixels_per_second(self.current_timeline_width)
+        self.current_pixels_per_second_in_timeline: float = self.calculate_pixels_per_second(self.current_visible_timeline_width)
 
     def apply_collapse_filter(self):
         """
@@ -246,8 +248,10 @@ class EventsInspector:
     def update_selected_timeline_keys(self):
         self.selected_timeline_keys = list(self.selected_timelines.keys())
 
-    def zoom_to_dates(self, from_dt: datetime, to_dt: datetime, refilter_based_on_date_range=False):
-
+    def zoom_to_dates(self, from_dt: datetime, to_dt: datetime, refilter_based_on_date_range=False) -> bool:
+        """
+        Returns True if there was a material change.
+        """
         # If the from and to are in reserve chronological order, correct it
         if from_dt > to_dt:
             t_dt = to_dt
@@ -271,14 +275,19 @@ class EventsInspector:
             if from_dt < self.absolute_timeline_start:
                 from_dt = self.absolute_timeline_start
 
+        material_change = False
+        if self.zoom_timeline_start != from_dt or self.zoom_timeline_stop != to_dt or refilter_based_on_date_range:
+            material_change = True
+
         self.zoom_timeline_start = from_dt
         self.zoom_timeline_stop = to_dt
         if refilter_based_on_date_range:
             self.apply_collapse_filter()
-        self.on_zoom_resize(self.current_timeline_width)
+        self.on_zoom_resize(self.current_visible_timeline_width)
+        return material_change
 
     def get_current_timeline_width(self):
-        return self.current_timeline_width
+        return self.current_visible_timeline_width
 
     def calculate_pixels_per_second(self, timeline_width: int) -> float:
         """
@@ -294,7 +303,7 @@ class EventsInspector:
 
     def current_interval_width(self, pd_interval_row: pandas.Series) -> float:
         return self.calculate_interval_pixel_width(
-            timeline_width=self.current_timeline_width,
+            timeline_width=self.current_visible_timeline_width,
             pd_interval_row=pd_interval_row
         )
 

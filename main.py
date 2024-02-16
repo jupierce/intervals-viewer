@@ -506,7 +506,7 @@ class IntervalsTimeline:
 
         self.timeline_absolute_start = timeline_absolute_start
         self.pixels_per_second = pixels_per_second
-        self.interval_tree = IntervalTree()  # Efficient data structure used to detect when mouse is over a given interval
+        self._interval_tree = IntervalTree()  # Efficient data structure used to detect when mouse is over a given interval
 
         # The rect_list contains a list of points [ (r1x1, r1y1), (r1x2, r1y2), (r1x3, r1y3), (r1x4, r1y4), (r2x1, r2y1), (r2x2, r1y2)...
         # representing different rectangle corners (the example above are the corners for two rectangles, r1/r2).
@@ -553,7 +553,7 @@ class IntervalsTimeline:
 
             # Add the pixels this rectangle occupies to a datastructure that can efficiently find the interval under a given x
             # coordinate. Use floor/ceil because x coordinate from mouse will be int.
-            self.interval_tree.add(Interval(math.floor(absolute_interval_line_start_x), math.ceil(absolute_interval_line_end_x), offset))
+            self._interval_tree.add(Interval(math.floor(absolute_interval_line_start_x), math.ceil(absolute_interval_line_end_x), offset))
 
             self.rect_list.extend(
                 (
@@ -611,7 +611,7 @@ class IntervalsTimeline:
         an interval (only one if there is more than one) the x position overlaps with.
         If multiple intervals are found, the list will be sorted in chronological order.
         """
-        matching_intervaltree_intervals = self.interval_tree[int(absolute_x)]
+        matching_intervaltree_intervals = self._interval_tree[int(absolute_x)]
         if matching_intervaltree_intervals:
             ordered_intervaltress_intervals = sorted(matching_intervaltree_intervals, key=lambda interval: interval.begin)
             matching_pd_intervals: List[pd.Series] = list()
@@ -1194,13 +1194,7 @@ class GraphSection(arcade.Section):
         buffered_graph.center_x = -1 * left_offset_from_datetime(baseline_dt=absolute_timeline_start, position_dt=zoom_timeline_start, pixels_per_second=pixels_per_second)
 
     def on_draw(self):
-        arcade.draw_lrtb_rectangle_filled(  # Clear the section
-            left=self.left,
-            right=self.right,
-            top=self.top,
-            bottom=self.bottom,
-            color=arcade.color.BLACK
-        )
+        self.window.clear()
 
         self.color_legend_bar.draw()
         self.zoom_date_range_display_bar.draw()
@@ -1268,7 +1262,8 @@ class GraphSection(arcade.Section):
                 colors.extend(interval_timeline.color_list)
                 # interval_timeline.draw(check_for_mouse_over_interval=check_for_mouse_over_interval)
                 visual_row_number += 1
-            self.buffered_graph.append(arcade.create_rectangles_filled_with_colors(rect_points, colors))
+            if rect_points:
+                self.buffered_graph.append(arcade.create_rectangles_filled_with_colors(rect_points, colors))
             pass
 
         self.set_buffered_graph_center_x(self.buffered_graph, self.ei.absolute_timeline_start, self.ei.zoom_timeline_start, self.ei.current_pixels_per_second_in_timeline)
@@ -1441,7 +1436,7 @@ class GraphInterfaceView(arcade.View):
         message_section_ref = self.message_section
         self.graph_section = GraphSection(ei, 0, 0, 0, 0, prevent_dispatch_view={False})
         self.adjust_section_positions(self.window.width, self.window.height)
-        self.add_section(self.graph_section)
+        self.add_section(self.graph_section)  # Graph clears screen on draw, so make sure it is the first section added.
         self.add_section(self.detail_section)
         self.add_section(self.message_section)
 
@@ -1462,6 +1457,7 @@ class GraphInterfaceView(arcade.View):
 
     def on_show_view(self):
         self.on_resize(self.window.width, self.window.height)
+        arcade.set_background_color(Theme.COLOR_TIMELINE_BACKGROUND)
 
     def on_mouse_motion(self, x: int, y: int, dx: int, dy: int):
         self.ei.last_known_mouse_location = (x, y)

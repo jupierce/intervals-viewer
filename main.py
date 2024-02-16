@@ -29,476 +29,6 @@ class IntervalsTimelineEntry:
         self.rect_offset = rect_offset
 
 
-class MessageSection(arcade.Section):
-    """
-    Section for display long strings.
-    """
-
-    def __init__(self, ei: EventsInspector, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.background = SimpleRect(
-            color=Theme.COLOR_MESSAGE_SECTION_BACKGROUND,
-            border_color=arcade.color.LIGHT_GRAY,
-            border_width=1
-        )
-        self.ei = ei
-        self.long_text = arcade.Text(
-            text='',
-            start_x=Layout.MESSAGE_SECTION_LEFT + 2,
-            start_y=0,
-            multiline=True,
-            width=self.window.width - 20,
-            color=Theme.COLOR_MESSAGE_SECTION_FONT_COLOR,
-            font_size=10,
-            font_name=Theme.FONT_NAME
-        )
-        self.on_resize(self.window.width, self.window.height)
-        self.set_message('')  # Trigger help message content
-
-    def on_resize(self, window_width: int, window_height: int):
-        self.background.position(
-            left=Layout.MESSAGE_SECTION_LEFT,
-            right=window_width - Layout.MESSAGE_SECTION_RIGHT_OFFSET,
-            bottom=Layout.MESSAGE_SECTION_BOTTOM,
-            top=Layout.MESSAGE_SECTION_TOP
-        )
-        self.long_text.width = self.background.width - 5
-        self.long_text.y = self.background.top - 14
-
-    def on_draw(self):
-        self.background.draw()
-        self.long_text.draw()
-
-    def set_message(self, message: Optional[str]):
-        if not message:
-            self.long_text.text = '''
-[R]=Reset Zoom  [+/-]=Timeline Height  [F1] Filtering  [C] Collapse  
-[Home/End]=Scroll Top/Bottom  [PgUp/PgDown/\u2191/\u2193/\u2190/\u2192]=Scroll
-[I] Import Additional Data            
-'''.strip()  # Strip initial linefeed
-        else:
-            self.long_text.text = '\n'.join(message.splitlines()[:5])
-
-
-class DetailSection(arcade.Section):
-    """
-    Section at the bottom of the layout which reports details about
-    what the mouse is hovering over in the graph area.
-    """
-
-    def __init__(self, ei: EventsInspector, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.background = SimpleRect(
-            color=Theme.COLOR_DETAIL_SECTION_BACKGROUND,
-            border_color=arcade.color.LIGHT_GRAY,
-            border_width=1,
-        )
-        self.ei = ei
-
-        font_size = Theme.FONT_SIZE_DETAILS_SECTION
-        self.mouse_from_time_dt: Optional[datetime.datetime] = None  # When the mouse is being dragged, the from time the mouse was pressed
-        self.mouse_over_time_dt: Optional[datetime.datetime] = None  # Set when the mouse is over a known datetime.
-        self.mouse_over_time_text: arcade.Text = arcade.Text('Wq',
-                                                             start_x=2,
-                                                             start_y=Layout.DETAIL_SECTION_HEIGHT - font_size - 2,
-                                                             font_name=Theme.FONT_NAME,
-                                                             font_size=font_size,
-                                                             color=Theme.COLOR_DETAIL_SECTION_FONT_COLOR,
-                                                             bold=True,
-                                                             )
-
-        # When the mouse is over a specific timeline, shows information pertinent to all intervals in that timeline (locator information)
-        self.mouse_over_intervals: Optional[pd.DataFrame] = None  # represents the timeline intervals the mouse is currently over
-        self.mouse_over_timeline_text: arcade.Text = arcade.Text('Wq',
-                                                                 start_x=2,
-                                                                 start_y=self.mouse_over_time_text.y - self.mouse_over_time_text.content_height,  # Uses time_info as content height clue for own positioning
-                                                                 multiline=True,
-                                                                 width=2000,  # multiline requires width. Set to large width to avoid wrapping.
-                                                                 font_name=Theme.FONT_NAME,
-                                                                 font_size=font_size,
-                                                                 color=Theme.COLOR_DETAIL_SECTION_FONT_COLOR
-                                                                 )
-
-        # When the mouse is over a specific interval, shows information pertinent to that interval
-        self.timeline_entries_under_mouse: Optional[IntervalsTimelineEntry] = None
-        self.mouse_over_interval_text: arcade.Text = arcade.Text('Wq',
-                                                                 start_x=600,
-                                                                 start_y=self.mouse_over_time_text.y - self.mouse_over_time_text.content_height,  # Uses time_info as content height clue for own positioning
-                                                                 multiline=True,
-                                                                 width=2000,  # multiline requires width. Set to large width to avoid wrapping.
-                                                                 font_name=Theme.FONT_NAME,
-                                                                 font_size=font_size,
-                                                                 color=Theme.COLOR_DETAIL_SECTION_FONT_COLOR
-                                                                 )
-
-        # We set 'Wq' to measure the content height. Clear it before we start rendering.
-        self.mouse_over_time_text.text = ''
-        self.mouse_over_timeline_text.text = ''
-        self.mouse_over_interval_text.text = ''
-
-        self.on_resize(self.window.width, self.window.height)
-
-    def on_resize(self, window_width: int, window_height: int):
-        self.mouse_over_interval_text.x = window_width // 2
-        self.background.position(left=Layout.DETAIL_SECTION_LEFT, width=window_width,
-                                 bottom=Layout.DETAIL_SECTION_BOTTOM, height=Layout.DETAIL_SECTION_HEIGHT)
-
-    def on_draw(self):
-        self.background.draw()
-        self.mouse_over_time_text.draw()
-        self.mouse_over_timeline_text.draw()
-
-        # The mouse_over_timeline_text may have many characters which go beyond the
-        # intended area and into the area of text meant for interval information.
-        # This rectangle will erase the overage before drawing the interval information.
-        left = Layout.DETAIL_SECTION_LEFT + self.mouse_over_interval_text.x
-        arcade.draw_lrtb_rectangle_filled(
-            left=left,
-            right=max(left, self.window.width - Layout.DETAIL_SECTION_RIGHT_OFFSET - self.background.border_width),
-            top=Layout.DETAIL_SECTION_HEIGHT - self.mouse_over_time_text.content_height,
-            bottom=Layout.DETAIL_SECTION_BOTTOM,
-            color=self.background.color,
-        )
-        self.mouse_over_interval_text.draw()
-
-    def set_mouse_over_time(self, dt: datetime.datetime, from_dt: Optional[datetime.datetime]):
-        self.mouse_from_time_dt = from_dt
-        self.mouse_over_time_dt = dt
-        self.refresh_mouse_over_time()
-
-    def refresh_mouse_over_time(self):
-        from_dt = self.mouse_from_time_dt
-        dt = self.mouse_over_time_dt
-
-        dt_str = dt.strftime("%Y-%m-%d %H:%M:%S.%f")
-        text = f'Mouse[ ({dt_str}) {self.ei.last_known_mouse_location}'
-        # from_dt is passed in if there is a mouse dragging operation. The click before the
-        # drag began is used to calculate a time offset for the initial mouse position.
-        if from_dt:
-            duration = from_dt - dt
-            if duration < datetime.timedelta(0):
-                duration = -duration
-            text += f'  from:({from_dt}), Δ:({humanize_timedelta(duration)})'
-        text += ' ]'
-
-        if self.timeline_entries_under_mouse is not None:
-            # If the mouse is over an interval, describe the interval times
-            for entry in self.timeline_entries_under_mouse:
-                interval = entry.pd_interval
-                delta = humanize_timedelta(datetime.timedelta(seconds=interval["duration"]))
-                text += f'    Interval[ {interval["classification"].display_name} ({interval["from"]})  ->  ({interval["to"]})  Δ:({delta}) ]'
-
-        self.mouse_over_time_text.text = text
-
-    def set_mouse_over_intervals(self, pd_interval_rows: pd.DataFrame):
-        self.mouse_over_intervals = pd_interval_rows
-        interval = pd_interval_rows.iloc[0]  # get the first interval in the timeline
-        lines: List[str] = list()
-
-        def add_displayed_value(display_name: str, val: str):
-            nonlocal lines
-            if val:
-                lines.append(f'{display_name:<{12}}: {val}')
-
-        def add_non_empty_key_line(display_name: str, key_name: str):
-            val = IntervalAnalyzer.get_locator_key(interval, key_name)
-            add_displayed_value(display_name, val)
-
-        common_keys = IntervalAnalyzer.get_locator_key_names(interval)
-
-        # These keys are aggregated into a single line.
-        id_keys = ['uid', 'hmsg']
-        for id_key in id_keys:
-            if id_key in common_keys:
-                common_keys.remove(id_key)
-
-        for common_key in common_keys:
-            add_non_empty_key_line(common_key.capitalize(), common_key)
-
-        id_str: str = ''
-        for id_key in id_keys:
-            val = IntervalAnalyzer.get_locator_key(interval, id_key)
-            if val:
-                id_str += f'[{id_key}={val}]'
-
-        if id_str:
-            add_displayed_value('IDs', id_str)
-
-        self.mouse_over_timeline_text.text = '\n'.join(lines)
-
-    def set_timeline_entries_under_mouse(self, timeline_entries: Optional[List[IntervalsTimelineEntry]]):
-        self.timeline_entries_under_mouse = timeline_entries
-
-        if not timeline_entries:  # Empty list or None, clear out information
-            # The interval is being cleared. Clear the text in the detail section.
-            self.mouse_over_interval_text.text = ''
-            message_section_ref.set_message('')
-            return
-
-        interval = timeline_entries[-1].pd_interval
-        lines: List[str] = list()
-
-        def add_displayed_value(display_name: str, val: str):
-            nonlocal lines
-            if val:
-                lines.append(f'{display_name:<{12}}: {val}')
-
-        def add_message_attr_line(display_name: str, attr_name: str):
-            val = IntervalAnalyzer.get_message_attr(interval, attr_name)
-            add_displayed_value(display_name, val)
-
-        def add_annotation_line(display_name: str, annotation_name: str):
-            val = IntervalAnalyzer.get_message_annotation(interval, annotation_name)
-            add_displayed_value(display_name, val)
-
-        for common_message_attr in ('cause',):  # 'reason' is duplicated in annotations, so don't print here.
-            add_message_attr_line(common_message_attr.capitalize(), common_message_attr)
-
-        for common_annotation_keys in IntervalAnalyzer.get_message_annotation_names(interval):
-            add_annotation_line(common_annotation_keys.capitalize(), common_annotation_keys)
-
-        display_message = ''
-        message_attr_val = IntervalAnalyzer.get_series_column_value(interval=interval, column_name='message')
-        if message_attr_val:
-            display_message = message_attr_val
-        human_message_val = IntervalAnalyzer.get_message_attr(interval, 'humanMessage')
-        if human_message_val and message_attr_val != human_message_val:
-            if display_message:
-                display_message += '\n'
-            display_message += human_message_val
-        message_section_ref.set_message(display_message)
-        self.mouse_over_interval_text.text = '\n'.join(lines)
-
-        # The interval that the mouse is over is displayed in the detail section.
-        # Checking whether the mouse is over an interval occurs on a schedule instead of
-        # on every mouse movement. So it is expected for this interval to be out of
-        # sync with what the mouse is actually over. When the interval is set, therefore,
-        # we need to refresh the mouse over date with the trued-up interval.
-        self.refresh_mouse_over_time()
-
-
-# Since different components all want to write different detail/messages,
-# store a global reference once we initialize.
-detail_section_ref: Optional[DetailSection] = None
-message_section_ref: Optional[MessageSection] = None
-
-
-class ColorLegendEntry(SimpleRect):
-
-    def __init__(self, window: arcade.Window, classification: IntervalClassification):
-        super().__init__(color=classification.color)
-        self.window = window
-        self.classification = classification
-        self.font_size = 10
-        self.category_text = arcade.Text(
-            text=str(self.classification.display_name),
-            start_x=0,
-            start_y=0,
-            color=arcade.color.BLACK,
-            font_name=Theme.FONT_NAME,
-            font_size=self.font_size,
-        )
-        self.text_width = self.category_text.content_width
-        self.pos(0)
-
-    def pos(self, left: int):
-        self.position(
-            left=left,
-            right=left + self.text_width + 6,
-            top=self.window.height - Layout.COLOR_LEGEND_BAR_TOP_OFFSET,
-            height=Layout.COLOR_LEGEND_BAR_HEIGHT
-        )
-        self.category_text.x = left + 3
-        self.category_text.y = self.bottom + 4
-
-    def draw(self):
-        super().draw()
-        if detail_section_ref.timeline_entries_under_mouse:
-            mouse_over_interval = detail_section_ref.timeline_entries_under_mouse[-1].pd_interval
-            if mouse_over_interval is not None and mouse_over_interval['classification'] == self.classification:
-                self.category_text.bold = True
-            elif self.category_text.bold:
-                self.category_text.bold = False
-        self.category_text.draw()
-
-
-class ColorLegendBar(SimpleRect):
-
-    def __init__(self, graph_section: arcade.Section, ei: EventsInspector):
-        super().__init__(color=arcade.color.BLACK)
-        self.ei = ei
-        self.graph_section = graph_section
-        self.window = self.graph_section.window
-
-        self.classifications: List[IntervalClassification] = [e.value for e in IntervalClassifications]
-
-        self.legend_label = arcade.Text(
-            text="Current Category Legend: ",
-            start_x=Layout.ZOOM_DATE_RANGE_DISPLAY_BAR_LEFT,  # align with the start of the date range bar
-            start_y=0,
-            color=arcade.color.WHITE,
-            font_name=Theme.FONT_NAME,
-            font_size=10,
-            bold=True,
-        )
-
-        self.legends: Dict[str, List[ColorLegendEntry]] = dict()
-        x_offsets: Dict[str, int] = dict()
-        for category in [e.value for e in IntervalCategories]:
-            category_name = category.display_name
-            self.legends[category_name] = list()
-            x_offsets[category_name] = Layout.ZOOM_DATE_RANGE_DISPLAY_BAR_LEFT + self.legend_label.content_width + 4  # When a category is display, each entry needs to shift by an offset
-
-        for classification in self.classifications:
-            category_name = classification.category.value.display_name
-            category_element_list = self.legends[category_name]
-            x_offset = x_offsets[category_name]
-            entry = ColorLegendEntry(self.window, classification)
-            category_element_list.append(entry)
-            entry.pos(x_offset)
-            x_offset += entry.width + 4  # 4px between legend entries
-            x_offsets[category_name] = x_offset  # Store the offset for the next entry's offset
-
-        self.on_resize()
-
-    def on_resize(self):
-        self.position(
-            left=Layout.COLOR_LEGEND_BAR_LEFT,
-            right=self.window.width - Layout.COLOR_LEGEND_BAR_RIGHT_OFFSET,
-            height=Layout.COLOR_LEGEND_BAR_HEIGHT,
-            top=self.window.height - Layout.COLOR_LEGEND_BAR_TOP_OFFSET
-        )
-        self.legend_label.y = self.bottom + 4
-        for legend_entries in self.legends.values():
-            for entry in legend_entries:
-                entry.pos(left=entry.left)  # Don't move left, but force a recalculation of Y position
-
-    def draw(self):
-        super().draw()
-        self.legend_label.draw()  # message indicates that bar is the legend
-        mouse_over_intervals = detail_section_ref.mouse_over_intervals
-        if mouse_over_intervals is not None:
-            first_interval = mouse_over_intervals.iloc[0]
-            category_name: str = first_interval['category_str']
-            for entry in self.legends[category_name]:
-                entry.draw()
-
-
-class ZoomDateRangeDisplayBar(SimpleRect):
-    DEFAULT_TICK = (arcade.color.ORANGE, 0.5, 3)
-    TICK_DRAW_RULES = {
-        # (color, hieght%, thickness)
-        60 * 60: (arcade.color.BLACK, 1.0, 3),  # hour ticks
-        60 * 30: (arcade.color.BLACK, 0.5, 3),  # half-hour
-        60 * 10: (arcade.color.BLACK, 0.2, 3),  # ten minute
-        60 * 5: (arcade.color.BLACK, 0.2, 1),  # 5 minute
-        60: (arcade.color.WHITE, 0.2, 3),  # 1 minute
-        30: (arcade.color.WHITE, 0.2, 3),  # 30 seconds
-        10: (arcade.color.WHITE, 0.2, 3),  # 10 seconds
-        5: (arcade.color.WHITE, 0.2, 1),  # 5 seconds
-    }
-
-    def __init__(self, graph_section: arcade.Section, ei: EventsInspector):
-        super().__init__(color=arcade.color.LIGHT_GRAY)
-        self.ei = ei
-        self.graph_section = graph_section
-        self.window = self.graph_section.window
-        self.on_resize()
-
-    def on_resize(self):
-        self.position(
-            left=Layout.ZOOM_DATE_RANGE_DISPLAY_BAR_LEFT,
-            right=self.window.width - Layout.ZOOM_DATE_RANGE_DISPLAY_BAR_RIGHT_OFFSET,
-            height=Layout.ZOOM_DATE_RANGE_DISPLAY_BAR_HEIGHT,
-            top=self.window.height - Layout.ZOOM_DATE_RANGE_DISPLAY_BAR_TOP_OFFSET
-        )
-
-    def draw(self):
-        super().draw()
-        seconds_in_timeline = self.ei.current_zoom_timeline_seconds
-
-        # Note that these values are rounded (down and up, respective) to the nearest minute by ei.
-        start_time = self.ei.zoom_timeline_start
-        stop_time = self.ei.zoom_timeline_stop
-
-        jumping_unit_options = [24*60*60, 12*60*60, 6*60*60, 60*60, 60*30, 60*10, 60*5, 60, 30, 10, 5]
-
-        tick_jumping_unit: int = jumping_unit_options[0]  # Start with maximum jumping unit
-        for jumping_unit_to_test in jumping_unit_options:
-            if seconds_in_timeline / jumping_unit_to_test > self.width * 0.10:
-                # This jumping unit would result in more than a tick mark every 10 pixels
-                break
-            tick_jumping_unit = jumping_unit_to_test
-
-        comfortable_number_of_labels = self.width // 100  # Don't position labels less than 100 pixels from each other
-
-        label_jumping_unit: int = jumping_unit_options[0]  # Start with maximum jumping unit and narrow in on what will fit comfortably
-        for jumping_unit_to_test in jumping_unit_options:
-            if seconds_in_timeline / jumping_unit_to_test > comfortable_number_of_labels:
-                # This jumping unit would result in more than a tick mark every 10 pixels
-                break
-            label_jumping_unit = jumping_unit_to_test
-
-        jumping_unit = min(tick_jumping_unit, label_jumping_unit)
-        pixels_per_jumping_unit = self.ei.calculate_pixels_per_second(self.width) * jumping_unit
-
-        # Start looking for ticks & labels at hour before the timeline starts.
-        # This ensures our jumps land on units aligned with the jumps.
-        moving_timestamp = start_time.floor('h')
-        moving_offset_x: Optional[float] = None
-        while moving_timestamp < stop_time:
-
-            def jump():
-                nonlocal moving_timestamp
-                moving_timestamp = moving_timestamp + datetime.timedelta(seconds=jumping_unit)
-
-            if moving_timestamp < start_time:
-                jump()
-                continue
-
-            elif moving_offset_x is None:
-                initial_offset_x = left_offset_from_datetime(start_time, moving_timestamp, pixels_per_second=self.ei.current_pixels_per_second_in_timeline)
-                moving_offset_x = initial_offset_x
-
-            time_part = moving_timestamp.time()
-            seconds_since_midnight = time_part.hour * 3600 + time_part.minute * 60 + time_part.second
-
-            ticket_draw_rule: Optional[Tuple] = None
-            for modder in jumping_unit_options:
-                if seconds_since_midnight % modder == 0:
-                    if modder in ZoomDateRangeDisplayBar.TICK_DRAW_RULES:
-                        ticket_draw_rule = ZoomDateRangeDisplayBar.TICK_DRAW_RULES[modder]
-                    else:
-                        # If the tick marks are >hour, just draw the default
-                        ticket_draw_rule = ZoomDateRangeDisplayBar.DEFAULT_TICK
-                    break
-
-            tick_color, tick_height_percent, tick_width = ticket_draw_rule
-            tick_x = self.left + moving_offset_x - (tick_width//2)
-            arcade.draw_line(
-                start_x=tick_x,
-                start_y=self.bottom,
-                end_x=tick_x,
-                end_y=self.bottom + self.height * tick_height_percent,
-                line_width=tick_width,
-                color=tick_color
-            )
-
-            if seconds_since_midnight % label_jumping_unit == 0:
-                stamp = f'{time_part.hour:02}:{time_part.minute:02}'
-                if time_part.second > 0:
-                    stamp += f':{time_part.second:02}'
-                arcade.draw_text(stamp,
-                                 start_x=self.left + moving_offset_x + 2,
-                                 start_y=self.top - 12,
-                                 font_name=Theme.FONT_NAME,
-                                 font_size=10,
-                                 color=arcade.color.BLACK)
-
-            jump()
-            moving_offset_x += pixels_per_jumping_unit
-
-
 class IntervalsTimeline:
 
     def __init__(self,
@@ -750,6 +280,477 @@ class IntervalsTimeline:
     @lru_cache(1)
     def get_timeline_id(self) -> str:
         return self.first_interval_row['timeline_id']
+
+
+class MessageSection(arcade.Section):
+    """
+    Section for display long strings.
+    """
+
+    def __init__(self, ei: EventsInspector, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.background = SimpleRect(
+            color=Theme.COLOR_MESSAGE_SECTION_BACKGROUND,
+            border_color=arcade.color.LIGHT_GRAY,
+            border_width=1
+        )
+        self.ei = ei
+        self.long_text = arcade.Text(
+            text='',
+            start_x=Layout.MESSAGE_SECTION_LEFT + 2,
+            start_y=0,
+            multiline=True,
+            width=self.window.width - 20,
+            color=Theme.COLOR_MESSAGE_SECTION_FONT_COLOR,
+            font_size=10,
+            font_name=Theme.FONT_NAME
+        )
+        self.on_resize(self.window.width, self.window.height)
+        self.set_message('')  # Trigger help message content
+
+    def on_resize(self, window_width: int, window_height: int):
+        self.background.position(
+            left=Layout.MESSAGE_SECTION_LEFT,
+            right=window_width - Layout.MESSAGE_SECTION_RIGHT_OFFSET,
+            bottom=Layout.MESSAGE_SECTION_BOTTOM,
+            top=Layout.MESSAGE_SECTION_TOP
+        )
+        self.long_text.width = self.background.width - 5
+        self.long_text.y = self.background.top - 14
+
+    def on_draw(self):
+        self.background.draw()
+        self.long_text.draw()
+
+    def set_message(self, message: Optional[str]):
+        if not message:
+            self.long_text.text = '''
+[R]=Reset Zoom  [+/-]=Timeline Height  [F1] Filtering  [C] Collapse  
+[Home/End]=Scroll Top/Bottom  [PgUp/PgDown/\u2191/\u2193/\u2190/\u2192]=Scroll
+[I] Import Additional Data            
+'''.strip()  # Strip initial linefeed
+        else:
+            self.long_text.text = '\n'.join(message.splitlines()[:5])
+
+
+class DetailSection(arcade.Section):
+    """
+    Section at the bottom of the layout which reports details about
+    what the mouse is hovering over in the graph area.
+    """
+
+    def __init__(self, ei: EventsInspector, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.background = SimpleRect(
+            color=Theme.COLOR_DETAIL_SECTION_BACKGROUND,
+            border_color=arcade.color.LIGHT_GRAY,
+            border_width=1,
+        )
+        self.ei = ei
+
+        font_size = Theme.FONT_SIZE_DETAILS_SECTION
+        self.mouse_from_time_dt: Optional[datetime.datetime] = None  # When the mouse is being dragged, the from time the mouse was pressed
+        self.mouse_over_time_dt: Optional[datetime.datetime] = None  # Set when the mouse is over a known datetime.
+        self.mouse_over_time_text: arcade.Text = arcade.Text('Wq',
+                                                             start_x=2,
+                                                             start_y=Layout.DETAIL_SECTION_HEIGHT - font_size - 2,
+                                                             font_name=Theme.FONT_NAME,
+                                                             font_size=font_size,
+                                                             color=Theme.COLOR_DETAIL_SECTION_FONT_COLOR,
+                                                             bold=True,
+                                                             )
+
+        # When the mouse is over a specific timeline, shows information pertinent to all intervals in that timeline (locator information)
+        self.mouse_over_intervals_timeline: Optional[IntervalsTimeline] = None  # represents the timeline intervals the mouse is currently over
+        self.mouse_over_timeline_text: arcade.Text = arcade.Text('Wq',
+                                                                 start_x=2,
+                                                                 start_y=self.mouse_over_time_text.y - self.mouse_over_time_text.content_height,  # Uses time_info as content height clue for own positioning
+                                                                 multiline=True,
+                                                                 width=2000,  # multiline requires width. Set to large width to avoid wrapping.
+                                                                 font_name=Theme.FONT_NAME,
+                                                                 font_size=font_size,
+                                                                 color=Theme.COLOR_DETAIL_SECTION_FONT_COLOR
+                                                                 )
+
+        # When the mouse is over a specific interval, shows information pertinent to that interval
+        self.timeline_entries_under_mouse: Optional[List[IntervalsTimelineEntry]] = None
+        self.mouse_over_interval_text: arcade.Text = arcade.Text('Wq',
+                                                                 start_x=600,
+                                                                 start_y=self.mouse_over_time_text.y - self.mouse_over_time_text.content_height,  # Uses time_info as content height clue for own positioning
+                                                                 multiline=True,
+                                                                 width=2000,  # multiline requires width. Set to large width to avoid wrapping.
+                                                                 font_name=Theme.FONT_NAME,
+                                                                 font_size=font_size,
+                                                                 color=Theme.COLOR_DETAIL_SECTION_FONT_COLOR
+                                                                 )
+
+        # We set 'Wq' to measure the content height. Clear it before we start rendering.
+        self.mouse_over_time_text.text = ''
+        self.mouse_over_timeline_text.text = ''
+        self.mouse_over_interval_text.text = ''
+
+        self.on_resize(self.window.width, self.window.height)
+
+    def on_resize(self, window_width: int, window_height: int):
+        self.mouse_over_interval_text.x = window_width // 2
+        self.background.position(left=Layout.DETAIL_SECTION_LEFT, width=window_width,
+                                 bottom=Layout.DETAIL_SECTION_BOTTOM, height=Layout.DETAIL_SECTION_HEIGHT)
+
+    def on_draw(self):
+        self.background.draw()
+        self.mouse_over_time_text.draw()
+        self.mouse_over_timeline_text.draw()
+
+        # The mouse_over_timeline_text may have many characters which go beyond the
+        # intended area and into the area of text meant for interval information.
+        # This rectangle will erase the overage before drawing the interval information.
+        left = Layout.DETAIL_SECTION_LEFT + self.mouse_over_interval_text.x
+        arcade.draw_lrtb_rectangle_filled(
+            left=left,
+            right=max(left, self.window.width - Layout.DETAIL_SECTION_RIGHT_OFFSET - self.background.border_width),
+            top=Layout.DETAIL_SECTION_HEIGHT - self.mouse_over_time_text.content_height,
+            bottom=Layout.DETAIL_SECTION_BOTTOM,
+            color=self.background.color,
+        )
+        self.mouse_over_interval_text.draw()
+
+    def set_mouse_over_time(self, dt: datetime.datetime, from_dt: Optional[datetime.datetime]):
+        self.mouse_from_time_dt = from_dt
+        self.mouse_over_time_dt = dt
+        self.refresh_mouse_over_time()
+
+    def refresh_mouse_over_time(self):
+        from_dt = self.mouse_from_time_dt
+        dt = self.mouse_over_time_dt
+
+        dt_str = dt.strftime("%Y-%m-%d %H:%M:%S.%f")
+        text = f'Mouse[ ({dt_str}) {self.ei.last_known_mouse_location}'
+        # from_dt is passed in if there is a mouse dragging operation. The click before the
+        # drag began is used to calculate a time offset for the initial mouse position.
+        if from_dt:
+            duration = from_dt - dt
+            if duration < datetime.timedelta(0):
+                duration = -duration
+            text += f'  from:({from_dt}), Δ:({humanize_timedelta(duration)})'
+        text += ' ]'
+
+        if self.timeline_entries_under_mouse is not None:
+            # If the mouse is over an interval, describe the interval times
+            for entry in self.timeline_entries_under_mouse:
+                interval = entry.pd_interval
+                delta = humanize_timedelta(datetime.timedelta(seconds=interval["duration"]))
+                text += f'    Interval[ {interval["classification"].display_name} ({interval["from"]})  ->  ({interval["to"]})  Δ:({delta}) ]'
+
+        self.mouse_over_time_text.text = text
+
+    def set_mouse_over_interval_timeline(self, interval_timeline: IntervalsTimeline):
+        self.mouse_over_intervals_timeline = interval_timeline
+        pd_interval_rows = interval_timeline.pd_interval_rows
+        interval = pd_interval_rows.iloc[0]  # get the first interval in the timeline
+        lines: List[str] = list()
+
+        def add_displayed_value(display_name: str, val: str):
+            nonlocal lines
+            if val:
+                lines.append(f'{display_name:<{12}}: {val}')
+
+        def add_non_empty_key_line(display_name: str, key_name: str):
+            val = IntervalAnalyzer.get_locator_key(interval, key_name)
+            add_displayed_value(display_name, val)
+
+        common_keys = IntervalAnalyzer.get_locator_key_names(interval)
+
+        # These keys are aggregated into a single line.
+        id_keys = ['uid', 'hmsg']
+        for id_key in id_keys:
+            if id_key in common_keys:
+                common_keys.remove(id_key)
+
+        for common_key in common_keys:
+            add_non_empty_key_line(common_key.capitalize(), common_key)
+
+        id_str: str = ''
+        for id_key in id_keys:
+            val = IntervalAnalyzer.get_locator_key(interval, id_key)
+            if val:
+                id_str += f'[{id_key}={val}]'
+
+        if id_str:
+            add_displayed_value('IDs', id_str)
+
+        self.mouse_over_timeline_text.text = '\n'.join(lines)
+
+    def set_timeline_entries_under_mouse(self, timeline_entries: Optional[List[IntervalsTimelineEntry]]):
+        self.timeline_entries_under_mouse = timeline_entries
+
+        if not timeline_entries:  # Empty list or None, clear out information
+            # The interval is being cleared. Clear the text in the detail section.
+            self.mouse_over_interval_text.text = ''
+            message_section_ref.set_message('')
+            return
+
+        interval = timeline_entries[-1].pd_interval
+        lines: List[str] = list()
+
+        def add_displayed_value(display_name: str, val: str):
+            nonlocal lines
+            if val:
+                lines.append(f'{display_name:<{12}}: {val}')
+
+        def add_message_attr_line(display_name: str, attr_name: str):
+            val = IntervalAnalyzer.get_message_attr(interval, attr_name)
+            add_displayed_value(display_name, val)
+
+        def add_annotation_line(display_name: str, annotation_name: str):
+            val = IntervalAnalyzer.get_message_annotation(interval, annotation_name)
+            add_displayed_value(display_name, val)
+
+        for common_message_attr in ('cause',):  # 'reason' is duplicated in annotations, so don't print here.
+            add_message_attr_line(common_message_attr.capitalize(), common_message_attr)
+
+        for common_annotation_keys in IntervalAnalyzer.get_message_annotation_names(interval):
+            add_annotation_line(common_annotation_keys.capitalize(), common_annotation_keys)
+
+        display_message = ''
+        message_attr_val = IntervalAnalyzer.get_series_column_value(interval=interval, column_name='message')
+        if message_attr_val:
+            display_message = message_attr_val
+        human_message_val = IntervalAnalyzer.get_message_attr(interval, 'humanMessage')
+        if human_message_val and message_attr_val != human_message_val:
+            if display_message:
+                display_message += '\n'
+            display_message += human_message_val
+        message_section_ref.set_message(display_message)
+        self.mouse_over_interval_text.text = '\n'.join(lines)
+
+        # The interval that the mouse is over is displayed in the detail section.
+        # Checking whether the mouse is over an interval occurs on a schedule instead of
+        # on every mouse movement. So it is expected for this interval to be out of
+        # sync with what the mouse is actually over. When the interval is set, therefore,
+        # we need to refresh the mouse over date with the trued-up interval.
+        self.refresh_mouse_over_time()
+
+
+# Since different components all want to write different detail/messages,
+# store a global reference once we initialize.
+detail_section_ref: Optional[DetailSection] = None
+message_section_ref: Optional[MessageSection] = None
+
+
+class ColorLegendEntry(SimpleRect):
+
+    def __init__(self, window: arcade.Window, classification: IntervalClassification):
+        super().__init__(color=classification.color)
+        self.window = window
+        self.classification = classification
+        self.font_size = 10
+        self.category_text = arcade.Text(
+            text=str(self.classification.display_name),
+            start_x=0,
+            start_y=0,
+            color=arcade.color.BLACK,
+            font_name=Theme.FONT_NAME,
+            font_size=self.font_size,
+        )
+        self.text_width = self.category_text.content_width
+        self.pos(0)
+
+    def pos(self, left: int):
+        self.position(
+            left=left,
+            right=left + self.text_width + 6,
+            top=self.window.height - Layout.COLOR_LEGEND_BAR_TOP_OFFSET,
+            height=Layout.COLOR_LEGEND_BAR_HEIGHT
+        )
+        self.category_text.x = left + 3
+        self.category_text.y = self.bottom + 4
+
+    def draw(self):
+        super().draw()
+        if detail_section_ref.timeline_entries_under_mouse:
+            mouse_over_interval = detail_section_ref.timeline_entries_under_mouse[-1].pd_interval
+            if mouse_over_interval is not None and mouse_over_interval['classification'] == self.classification:
+                self.category_text.bold = True
+            elif self.category_text.bold:
+                self.category_text.bold = False
+        self.category_text.draw()
+
+
+class ColorLegendBar(SimpleRect):
+
+    def __init__(self, graph_section: arcade.Section, ei: EventsInspector):
+        super().__init__(color=arcade.color.BLACK)
+        self.ei = ei
+        self.graph_section = graph_section
+        self.window = self.graph_section.window
+
+        self.classifications: List[IntervalClassification] = [e.value for e in IntervalClassifications]
+
+        self.legend_label = arcade.Text(
+            text="Current Category Legend: ",
+            start_x=Layout.ZOOM_DATE_RANGE_DISPLAY_BAR_LEFT,  # align with the start of the date range bar
+            start_y=0,
+            color=arcade.color.WHITE,
+            font_name=Theme.FONT_NAME,
+            font_size=10,
+            bold=True,
+        )
+
+        self.legends: Dict[str, List[ColorLegendEntry]] = dict()
+        x_offsets: Dict[str, int] = dict()
+        for category in [e.value for e in IntervalCategories]:
+            category_name = category.display_name
+            self.legends[category_name] = list()
+            x_offsets[category_name] = Layout.ZOOM_DATE_RANGE_DISPLAY_BAR_LEFT + self.legend_label.content_width + 4  # When a category is display, each entry needs to shift by an offset
+
+        for classification in self.classifications:
+            category_name = classification.category.value.display_name
+            category_element_list = self.legends[category_name]
+            x_offset = x_offsets[category_name]
+            entry = ColorLegendEntry(self.window, classification)
+            category_element_list.append(entry)
+            entry.pos(x_offset)
+            x_offset += entry.width + 4  # 4px between legend entries
+            x_offsets[category_name] = x_offset  # Store the offset for the next entry's offset
+
+        self.on_resize()
+
+    def on_resize(self):
+        self.position(
+            left=Layout.COLOR_LEGEND_BAR_LEFT,
+            right=self.window.width - Layout.COLOR_LEGEND_BAR_RIGHT_OFFSET,
+            height=Layout.COLOR_LEGEND_BAR_HEIGHT,
+            top=self.window.height - Layout.COLOR_LEGEND_BAR_TOP_OFFSET
+        )
+        self.legend_label.y = self.bottom + 4
+        for legend_entries in self.legends.values():
+            for entry in legend_entries:
+                entry.pos(left=entry.left)  # Don't move left, but force a recalculation of Y position
+
+    def draw(self):
+        super().draw()
+        self.legend_label.draw()  # message indicates that bar is the legend
+        mouse_over_intervals_timeline = detail_section_ref.mouse_over_intervals_timeline
+        if mouse_over_intervals_timeline is not None:
+            first_interval = mouse_over_intervals_timeline.pd_interval_rows.iloc[0]
+            category_name: str = first_interval['category_str']
+            for entry in self.legends[category_name]:
+                entry.draw()
+
+
+class ZoomDateRangeDisplayBar(SimpleRect):
+    DEFAULT_TICK = (arcade.color.ORANGE, 0.5, 3)
+    TICK_DRAW_RULES = {
+        # (color, hieght%, thickness)
+        60 * 60: (arcade.color.BLACK, 1.0, 3),  # hour ticks
+        60 * 30: (arcade.color.BLACK, 0.5, 3),  # half-hour
+        60 * 10: (arcade.color.BLACK, 0.2, 3),  # ten minute
+        60 * 5: (arcade.color.BLACK, 0.2, 1),  # 5 minute
+        60: (arcade.color.WHITE, 0.2, 3),  # 1 minute
+        30: (arcade.color.WHITE, 0.2, 3),  # 30 seconds
+        10: (arcade.color.WHITE, 0.2, 3),  # 10 seconds
+        5: (arcade.color.WHITE, 0.2, 1),  # 5 seconds
+    }
+
+    def __init__(self, graph_section: arcade.Section, ei: EventsInspector):
+        super().__init__(color=arcade.color.LIGHT_GRAY)
+        self.ei = ei
+        self.graph_section = graph_section
+        self.window = self.graph_section.window
+        self.on_resize()
+
+    def on_resize(self):
+        self.position(
+            left=Layout.ZOOM_DATE_RANGE_DISPLAY_BAR_LEFT,
+            right=self.window.width - Layout.ZOOM_DATE_RANGE_DISPLAY_BAR_RIGHT_OFFSET,
+            height=Layout.ZOOM_DATE_RANGE_DISPLAY_BAR_HEIGHT,
+            top=self.window.height - Layout.ZOOM_DATE_RANGE_DISPLAY_BAR_TOP_OFFSET
+        )
+
+    def draw(self):
+        super().draw()
+        seconds_in_timeline = self.ei.current_zoom_timeline_seconds
+
+        # Note that these values are rounded (down and up, respective) to the nearest minute by ei.
+        start_time = self.ei.zoom_timeline_start
+        stop_time = self.ei.zoom_timeline_stop
+
+        jumping_unit_options = [24*60*60, 12*60*60, 6*60*60, 60*60, 60*30, 60*10, 60*5, 60, 30, 10, 5]
+
+        tick_jumping_unit: int = jumping_unit_options[0]  # Start with maximum jumping unit
+        for jumping_unit_to_test in jumping_unit_options:
+            if seconds_in_timeline / jumping_unit_to_test > self.width * 0.10:
+                # This jumping unit would result in more than a tick mark every 10 pixels
+                break
+            tick_jumping_unit = jumping_unit_to_test
+
+        comfortable_number_of_labels = self.width // 100  # Don't position labels less than 100 pixels from each other
+
+        label_jumping_unit: int = jumping_unit_options[0]  # Start with maximum jumping unit and narrow in on what will fit comfortably
+        for jumping_unit_to_test in jumping_unit_options:
+            if seconds_in_timeline / jumping_unit_to_test > comfortable_number_of_labels:
+                # This jumping unit would result in more than a tick mark every 10 pixels
+                break
+            label_jumping_unit = jumping_unit_to_test
+
+        jumping_unit = min(tick_jumping_unit, label_jumping_unit)
+        pixels_per_jumping_unit = self.ei.calculate_pixels_per_second(self.width) * jumping_unit
+
+        # Start looking for ticks & labels at hour before the timeline starts.
+        # This ensures our jumps land on units aligned with the jumps.
+        moving_timestamp = start_time.floor('h')
+        moving_offset_x: Optional[float] = None
+        while moving_timestamp < stop_time:
+
+            def jump():
+                nonlocal moving_timestamp
+                moving_timestamp = moving_timestamp + datetime.timedelta(seconds=jumping_unit)
+
+            if moving_timestamp < start_time:
+                jump()
+                continue
+
+            elif moving_offset_x is None:
+                initial_offset_x = left_offset_from_datetime(start_time, moving_timestamp, pixels_per_second=self.ei.current_pixels_per_second_in_timeline)
+                moving_offset_x = initial_offset_x
+
+            time_part = moving_timestamp.time()
+            seconds_since_midnight = time_part.hour * 3600 + time_part.minute * 60 + time_part.second
+
+            ticket_draw_rule: Optional[Tuple] = None
+            for modder in jumping_unit_options:
+                if seconds_since_midnight % modder == 0:
+                    if modder in ZoomDateRangeDisplayBar.TICK_DRAW_RULES:
+                        ticket_draw_rule = ZoomDateRangeDisplayBar.TICK_DRAW_RULES[modder]
+                    else:
+                        # If the tick marks are >hour, just draw the default
+                        ticket_draw_rule = ZoomDateRangeDisplayBar.DEFAULT_TICK
+                    break
+
+            tick_color, tick_height_percent, tick_width = ticket_draw_rule
+            tick_x = self.left + moving_offset_x - (tick_width//2)
+            arcade.draw_line(
+                start_x=tick_x,
+                start_y=self.bottom,
+                end_x=tick_x,
+                end_y=self.bottom + self.height * tick_height_percent,
+                line_width=tick_width,
+                color=tick_color
+            )
+
+            if seconds_since_midnight % label_jumping_unit == 0:
+                stamp = f'{time_part.hour:02}:{time_part.minute:02}'
+                if time_part.second > 0:
+                    stamp += f':{time_part.second:02}'
+                arcade.draw_text(stamp,
+                                 start_x=self.left + moving_offset_x + 2,
+                                 start_y=self.top - 12,
+                                 font_name=Theme.FONT_NAME,
+                                 font_size=10,
+                                 color=arcade.color.BLACK)
+
+            jump()
+            moving_offset_x += pixels_per_jumping_unit
 
 
 class VerticalScrollBar(SimpleRect):
@@ -1360,13 +1361,13 @@ class GraphSection(arcade.Section):
         else:
             self.is_mouse_over_timeline_area = False
 
-        detail_section_ref.mouse_over_intervals = None
+        detail_section_ref.mouse_over_intervals_timeline = None
         if self.is_mouse_over_timeline_area:
             try:
                 # Find which timeline the mouse is over and add that set of intervals to the detail section.
                 timeline_row_offset = self.mouse_timeline_area_offset_from_top // self.row_height_px
                 mouse_is_over_interval_timeline = self.visible_interval_timelines[timeline_row_offset]
-                detail_section_ref.set_mouse_over_intervals(mouse_is_over_interval_timeline.pd_interval_rows)
+                detail_section_ref.set_mouse_over_interval_timeline(mouse_is_over_interval_timeline)
 
                 # Find which interval of the current timeline the mouse is over and set that into the detail section.
                 absolute_x_offset = (-1 * self.buffered_graph.center_x) + x

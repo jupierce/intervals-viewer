@@ -17,10 +17,40 @@ from analyzer.intervals import IntervalAnalyzer, IntervalCategories, IntervalCla
 from ui import FilteringView, ImportTimelineView
 from ui.layout import Theme, Layout
 from analyzer.util import extract_and_process_tar
+import pyglet
+
+
+def get_max_resolution():
+    screens = pyglet.canvas.get_display().get_screens()
+    max_width = max(screen.width for screen in screens)
+    max_height = max(screen.height for screen in screens)
+    return max_width, max_height
+
+
+# For performance reasons, we need caches that can contain all
+# visible rows on a screen.
+MAX_TIMELINES_TO_DISPLAY_AT_ONCE = max(*get_max_resolution())
+
 
 INIT_SCREEN_WIDTH = 500
 INIT_SCREEN_HEIGHT = 500
 SCREEN_TITLE = "Intervals Analysis"
+
+
+class LineInfo:
+    def __init__(self, start: arcade.Point, stop: arcade.Point, color: arcade.Color, line_width: int = 1):
+        self.start = start
+        self.end = stop
+        self.color = color
+        self.line_width = line_width
+
+    def __eq__(self, other):
+        if isinstance(other, LineInfo):
+            return self.start == other.start and self.end == other.end and self.color == other.color and self.line_width == other.line_width
+        return NotImplemented
+
+    def __hash__(self):
+        return hash((self.start, self.end, self.color, self.line_width))
 
 
 class IntervalsTimelineEntry:
@@ -37,6 +67,7 @@ class IntervalsTimeline:
                  timeline_row_height: int,
                  timeline_absolute_start: pd.Timestamp,
                  pixels_per_second: float):
+        self.lower_layer_decorations_cache: Optional[Tuple[List[LineInfo], List[arcade.Shape]]] = None
         self.first_interval_row = pd_interval_rows.iloc[0]
         self.group_id = group_id
         self.pd_interval_rows = pd_interval_rows
@@ -281,6 +312,70 @@ class IntervalsTimeline:
     def get_timeline_id(self) -> str:
         return self.first_interval_row['timeline_id']
 
+    def _lower_highlight_color_for_match_level(self, level: int):
+        return (255, 255, 0, 160 // (5 - level))
+
+    def _get_lower_layer_decorations(self, mouse_over_intervals_timeline: Optional["IntervalsTimeline"], mouse_over_intervals_timeline_entry: Optional[IntervalsTimelineEntry], absolute_timeline_pixel_width: float) -> List[LineInfo]:
+        safe_width = absolute_timeline_pixel_width + Layout.CATEGORY_BAR_RIGHT  # Sufficient to cover the entire absolute timeline width
+        if mouse_over_intervals_timeline and len(mouse_over_intervals_timeline.pd_interval_rows.index) > 0 is not None:
+            first_interval_of_mouse_over_intervals = mouse_over_intervals_timeline.pd_interval_rows.iloc[0]
+            match_level = 0
+            if self != mouse_over_intervals_timeline:
+                # If the mouse is over an interval timeline which is NOT this, see if this timeline shares any characteristics
+                # with the timeline under the mouse. Draw a dim yellow color under the timeline if so, an increase color
+                # intensity by the strength of the match.
+                for match_attr in ('namespace', 'pod', 'container', 'uid'):
+                    over_attr = IntervalAnalyzer.get_locator_key(first_interval_of_mouse_over_intervals, match_attr)
+                    if over_attr and IntervalAnalyzer.get_locator_key(self.first_interval_row, match_attr) == over_attr:
+                        match_level += 1
+                    else:
+                        break
+
+                if match_level > 0:
+                    return [
+                        LineInfo((0, self.last_transform_y + self.timeline_row_height//2),
+                                 (safe_width, self.last_transform_y + self.timeline_row_height//2),
+                                 self._lower_highlight_color_for_match_level(match_level),
+                                 line_width=self.timeline_row_height)
+                    ]
+            else:
+                # This timeline is under the mouse.
+                return [
+                    LineInfo((0, self.last_transform_y + self.timeline_row_height // 2),
+                             (safe_width, self.last_transform_y + self.timeline_row_height // 2),
+                             (211, 155, 203, 120),
+                             line_width=self.timeline_row_height)
+                ]
+
+        return []
+
+    def _convert_to_shapes(self, lines: List[LineInfo]) -> List[arcade.Shape]:
+        shapes: List[arcade.Shape] = list()
+        for line in lines:
+            shapes.append(arcade.create_line(
+                start_x=line.start[0],
+                start_y=line.start[1],
+                end_x=line.end[0],
+                end_y=line.end[1],
+                color=line.color,
+                line_width=line.line_width
+            ))
+        return shapes
+
+    @lru_cache(maxsize=MAX_TIMELINES_TO_DISPLAY_AT_ONCE)
+    def get_lower_layer_decorations(self,
+                                    mouse_over_intervals_timeline: Optional["IntervalsTimeline"],
+                                    mouse_over_intervals_timeline_entry: Optional[IntervalsTimelineEntry],
+                                    row_offset: int,  # While row_offset is not used for calculations, it is critical for caching as decorations need to move when a timeline is displayed on a different row
+                                    absolute_timeline_pixel_width: float,  # The number of pixels in the absolute timeline (i.e. ignore current zoom)
+                                    ) -> Tuple[List[arcade.Shape], bool]:
+        new_lower_layer_decorations = self._get_lower_layer_decorations(mouse_over_intervals_timeline, mouse_over_intervals_timeline_entry, absolute_timeline_pixel_width)
+        changed = False
+        if self.lower_layer_decorations_cache is None or new_lower_layer_decorations != self.lower_layer_decorations_cache[0]:
+            self.lower_layer_decorations_cache = (new_lower_layer_decorations, self._convert_to_shapes(new_lower_layer_decorations))
+            changed = True
+        return self.lower_layer_decorations_cache[1], changed
+
 
 class MessageSection(arcade.Section):
     """
@@ -390,6 +485,11 @@ class DetailSection(arcade.Section):
         self.mouse_over_interval_text.text = ''
 
         self.on_resize(self.window.width, self.window.height)
+
+    def get_focused_timeline_entry_under_mouse(self) -> Optional[IntervalsTimelineEntry]:
+        if self.timeline_entries_under_mouse:
+            return self.timeline_entries_under_mouse[-1]
+        return None
 
     def on_resize(self, window_width: int, window_height: int):
         self.mouse_over_interval_text.x = window_width // 2
@@ -969,11 +1069,6 @@ class GraphSection(arcade.Section):
 
     PERIOD_BETWEEN_REACTION_TO_KEY_DOWN: float = 1 / 50
 
-    # Updating the information about the selected timeline and interval
-    # is a relatively expensive operation. So do it only as fast as a human
-    # could conceivably react to the information.
-    PERIOD_BETWEEN_INTERVAL_DETAIL_UPDATE: float = 1 / 10
-
     def __init__(self, ei: EventsInspector, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
@@ -983,6 +1078,8 @@ class GraphSection(arcade.Section):
         # (e.g. scrolling left or right should not necessitate rebuilding this
         # list).
         self.buffered_graph: Optional[arcade.ShapeElementList] = None
+
+        self.buffered_low_layer_decorations: Optional[arcade.ShapeElementList] = None
 
         self.fps = 0
         self.ei = ei
@@ -1033,7 +1130,11 @@ class GraphSection(arcade.Section):
 
         self.on_resize(self.window.width, self.window.height)
 
-    @lru_cache(1000)
+    def rebuild_buffered_shapes(self):
+        self.buffered_graph = None
+        self.buffered_low_layer_decorations = None
+
+    @lru_cache(MAX_TIMELINES_TO_DISPLAY_AT_ONCE)
     def get_interval_timeline(self, group_id, absolute_timeline_start: pd.Timestamp, timeline_row_height_px: int, pixels_per_second: float) -> IntervalsTimeline:
         """
         :param group_id: A key for ei.timelines to find a DataFrame of interval rows for a specific timeline row.
@@ -1059,7 +1160,7 @@ class GraphSection(arcade.Section):
     @row_height_px.setter
     def row_height_px(self, value: int):
         self._row_height_px = value
-        self.buffered_graph = None  # Trigger rectangles to be recomputed
+        self.rebuild_buffered_shapes()
 
     @property
     def scroll_y_rows(self):
@@ -1073,7 +1174,7 @@ class GraphSection(arcade.Section):
             # Don't recompute anything if the value isn't actually changing.
             return
         self._scroll_y_rows = val
-        self.buffered_graph = None  # Trigger rectangles to be recomputed
+        self.rebuild_buffered_shapes()
         self.update_scroll_bars()
 
     def update_scroll_bars(self):
@@ -1100,7 +1201,7 @@ class GraphSection(arcade.Section):
         # significantly. In that, case, the old offset into the list is potentially meaningless.
         self.scroll_y_rows = previous_scroll_position
         if material_change:
-            self.buffered_graph = None
+            self.rebuild_buffered_shapes()
         self.update_scroll_bars()
 
     def process_keys_down(self, delay_until_next: Optional[float] = None):
@@ -1191,13 +1292,13 @@ class GraphSection(arcade.Section):
         self.vertical_scroll_bar.on_resize()
         self.horizontal_scroll_bar.on_resize()
         self.update_scroll_bars()  # Trigger a scroll bar handle re-calculation
-        self.buffered_graph = None
+        self.rebuild_buffered_shapes()
 
     def calc_rows_to_display(self) -> int:
         """
         Returns the number of FULL rows that can be displayed in the timeline graphing area.
         """
-        return self.category_bar.height // self.row_height_px
+        return min(MAX_TIMELINES_TO_DISPLAY_AT_ONCE, self.category_bar.height // self.row_height_px)
 
     @lru_cache(maxsize=1)  # Lazy abuse of lru_cache in order to only set center_x when things change. Pass in buffered_graph to invalidate cache if a new ShapeElementList is instantiated.
     def set_buffered_graph_center_x(self, buffered_graph: arcade.ShapeElementList, absolute_timeline_start, zoom_timeline_start, pixels_per_second):
@@ -1219,6 +1320,7 @@ class GraphSection(arcade.Section):
             self.scroll_y_rows = max(0, len(available_timelines_ids) - self.calc_rows_to_display())
 
         pixels_per_second = self.ei.calculate_pixels_per_second(self.ei.current_visible_timeline_width)
+
         if not self.buffered_graph:
             row_id_tuples_to_render = available_timelines_ids[self.scroll_y_rows:self.scroll_y_rows + number_of_rows_to_display]
 
@@ -1253,9 +1355,28 @@ class GraphSection(arcade.Section):
                 visual_row_number += 1
             if rect_points:
                 self.buffered_graph.append(arcade.create_rectangles_filled_with_colors(rect_points, colors))
-            pass
 
         self.set_buffered_graph_center_x(self.buffered_graph, self.ei.absolute_timeline_start, self.ei.zoom_timeline_start, self.ei.current_pixels_per_second_in_timeline)
+
+        overall_lower_decorations_change = False
+        lower_decorations = list()
+        for row_offset, interval_timeline in enumerate(self.visible_interval_timelines):
+            decoration_shapes, changed = interval_timeline.get_lower_layer_decorations(
+                mouse_over_intervals_timeline=detail_section_ref.mouse_over_intervals_timeline,
+                mouse_over_intervals_timeline_entry=detail_section_ref.get_focused_timeline_entry_under_mouse(),
+                row_offset=row_offset,
+                absolute_timeline_pixel_width=self.ei.absolute_duration * self.ei.current_pixels_per_second_in_timeline
+            )
+            lower_decorations.extend(decoration_shapes)
+            if changed:
+                overall_lower_decorations_change = True
+
+        if overall_lower_decorations_change or not self.buffered_low_layer_decorations:
+            self.buffered_low_layer_decorations = arcade.ShapeElementList()
+            for shape in lower_decorations:
+                self.buffered_low_layer_decorations.append(shape)
+
+        self.buffered_low_layer_decorations.draw()
         self.buffered_graph.draw()
 
         if arcade.MOUSE_BUTTON_LEFT in self.mouse_button_down and \
@@ -1284,14 +1405,14 @@ class GraphSection(arcade.Section):
                              line_width=1)
 
             # Draw the horizontal cross hair line
-            arcade.draw_line(
-                start_x=Layout.CATEGORY_BAR_WIDTH + Layout.CATEGORY_BAR_LEFT,
-                start_y=self.zoom_date_range_display_bar.bottom - (self.mouse_timeline_area_offset_from_top // self.row_height_px * self.row_height_px),
-                end_x=Layout.CATEGORY_BAR_WIDTH + Layout.CATEGORY_BAR_LEFT + self.ei.current_visible_timeline_width,
-                end_y=self.zoom_date_range_display_bar.bottom - (self.mouse_timeline_area_offset_from_top // self.row_height_px * self.row_height_px),
-                line_width=1,
-                color=Theme.COLOR_CROSS_HAIR_LINES
-            )
+            # arcade.draw_line(
+            #     start_x=Layout.CATEGORY_BAR_WIDTH + Layout.CATEGORY_BAR_LEFT,
+            #     start_y=self.zoom_date_range_display_bar.bottom - (self.mouse_timeline_area_offset_from_top // self.row_height_px * self.row_height_px),
+            #     end_x=Layout.CATEGORY_BAR_WIDTH + Layout.CATEGORY_BAR_LEFT + self.ei.current_visible_timeline_width,
+            #     end_y=self.zoom_date_range_display_bar.bottom - (self.mouse_timeline_area_offset_from_top // self.row_height_px * self.row_height_px),
+            #     line_width=1,
+            #     color=Theme.COLOR_CROSS_HAIR_LINES
+            # )
 
             if detail_section_ref.timeline_entries_under_mouse:
                 pass

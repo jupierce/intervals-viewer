@@ -1,4 +1,5 @@
 import arcade
+import numpy as np
 import pandas
 import pandas as pd
 import traceback
@@ -22,8 +23,38 @@ def seconds_between(pd_datetime_from: pandas.Timestamp, pd_datatime_to:pandas.Ti
         return 0.0
 
 
+def left_offset_from_datetime(baseline_dt: pd.Timestamp, position_dt: pd.Timestamp, pixels_per_second: float) -> float:
+    """
+    Given two timestamps (from, to), calculate the number of pixels which would represent the visual spacing
+    between the two times.
+    Args:
+        baseline_dt: Baseline time.
+        position_dt: Time to assess offset from baseline.
+        pixels_per_second: The number of pixels per second presently represented on the screen (may be <1.0)
+    """
+    return seconds_between(baseline_dt, position_dt) * pixels_per_second
+
+
+def left_offset_to_datetime(baseline_dt: pd.Timestamp, left_offset_px: float, pixels_per_second: float) -> datetime:
+    """
+    Given a baseline datetime, determine what datetime is represented by a pixel offset from that baseline.
+    Args:
+        baseline_dt: The baseline datetime.
+        left_offset_px: The number of pixels away the date to determine is from that baseline.
+        pixels_per_second: The number of pixels per second presently represented on the screen (may be <1.0)
+    Returns:
+        An approximate datetime that the pixel offset represents.
+    """
+    return baseline_dt + timedelta(microseconds=int(left_offset_px / pixels_per_second * 1000000))
+
+
 def get_interval_duration(row: pd.Series):
     return seconds_between(row['from'], row['to'])
+
+
+def get_interval_width_px(pd_interval_row: pandas.Series, pixels_per_second: float) -> float:
+    duration = pd_interval_row['duration']
+    return max(3.0, duration * pixels_per_second)  # Give even the smallest interval several pixels to ensure it can be hovered over easily.
 
 
 class Details:
@@ -42,6 +73,7 @@ class EventsInspector:
         # No data yet, so setup arbitrary start and stop for absolute timeline extents
         self.absolute_timeline_start: pd.Timestamp = pd.Timestamp.now()
         self.absolute_timeline_stop: pd.Timestamp = pd.Timestamp.now() + timedelta(minutes=60)
+        self.absolute_duration = 0
         self.zoom_timeline_start: pd.Timestamp = self.absolute_timeline_start
         self.zoom_timeline_stop: pd.Timestamp = self.absolute_timeline_stop
 
@@ -49,7 +81,7 @@ class EventsInspector:
         self.selected_rows = self.events_df
 
         # The number of horizontal pixels available to draw each timeline row
-        self.current_timeline_width = 0
+        self.current_visible_timeline_width = 0
         self.current_pixels_per_second_in_timeline = 0
         # The number of seconds each time is expected to represent
         self.current_zoom_timeline_seconds: Optional[float] = 1
@@ -61,6 +93,7 @@ class EventsInspector:
         # Each group is, in effective, all the intervals that should be rendered for a
         # timeline row.
         self.selected_timelines: OrderedDict[Any, pd.DataFrame] = dict()
+        self.selected_timeline_keys: List[Tuple] = list()  # keeps an ordered list of timeline keys (same order that exist in self.selected_timelines
 
         self.details: Details = Details(self)
         self.last_filter_query: Optional[str] = None
@@ -125,18 +158,15 @@ class EventsInspector:
     def add_intervals(self, new_events: pandas.DataFrame):
         self.events_df = pd.concat([self.events_df, new_events], ignore_index=True, sort=False)
 
-        # Reassess the data for max/min
-        self.absolute_timeline_start: pd.Timestamp = (self.events_df['from'].min()).floor('min')  # Get the earliest interval start and round down to nearest minute
-        self.absolute_timeline_stop: pd.Timestamp = (self.events_df['to'].max()).ceil('min')
-
         # Order rows by category, timeline, then make sure all rows are in chronological order by start time
         self.events_df = self.events_df.sort_values(['category_str', 'timeline_id', 'from'], ascending=True)
+
+        self.rebuild_all_timelines()
 
         self.zoom_timeline_start: pd.Timestamp = self.absolute_timeline_start
         self.zoom_timeline_stop: pd.Timestamp = self.absolute_timeline_stop
         self.selected_rows = self.events_df
 
-        self.rebuild_all_timelines()
         self.set_filter_query(self.last_filter_query)  # Re-apply the filter to apply to combined data
 
     def rebuild_all_timelines(self):
@@ -144,6 +174,12 @@ class EventsInspector:
         Call whenever the pandas intervals have changed (e.g. new data) - meaning there are
         potentially new timeline groups to create / a new order in which to display them.
         """
+
+        # Reassess the data for max/min
+        self.absolute_timeline_start: pd.Timestamp = (self.events_df['from'].min()).floor('min')  # Get the earliest interval start and round down to nearest minute
+        self.absolute_timeline_stop: pd.Timestamp = (self.events_df['to'].max()).ceil('min')
+        self.absolute_duration = seconds_between(self.absolute_timeline_start, self.absolute_timeline_stop)
+
         # This is tricky. We could collect up the dataframes associated with each timeline
         # with a simple df.groupby(['category_str', 'timeline_id']). However, when viewing the
         # timelines on the screen, we sometimes want the order of the timelines WITHIN A GROUP to be
@@ -173,6 +209,7 @@ class EventsInspector:
         for key, pd_intervals in self.all_timelines.items():
             if key in grouped.groups.keys():
                 self.selected_timelines[key] = pd_intervals
+        self.update_selected_timeline_keys()
 
     def set_filter_query(self, query: Optional[str] = None):
         if query:
@@ -186,11 +223,11 @@ class EventsInspector:
         self.last_filter_query = query
         self.rebuild_selected_timelines_with(self.selected_rows)
 
-    def on_zoom_resize(self, timeline_width):
-        self.current_timeline_width = timeline_width
+    def on_zoom_resize(self, visible_timeline_width_px):
+        self.current_visible_timeline_width = visible_timeline_width_px
         # Number of seconds which must be displayed in the timeline
         self.current_zoom_timeline_seconds = seconds_between(self.zoom_timeline_start, self.zoom_timeline_stop)
-        self.current_pixels_per_second_in_timeline: float = self.calculate_pixels_per_second(self.current_timeline_width)
+        self.current_pixels_per_second_in_timeline: float = self.calculate_pixels_per_second(self.current_visible_timeline_width)
 
     def apply_collapse_filter(self):
         """
@@ -206,9 +243,15 @@ class EventsInspector:
         for key, pd_intervals in self.all_timelines.items():
             if key in grouped.groups.keys():
                 self.selected_timelines[key] = pd_intervals
+        self.update_selected_timeline_keys()
 
-    def zoom_to_dates(self, from_dt: datetime, to_dt: datetime, refilter_based_on_date_range=False):
+    def update_selected_timeline_keys(self):
+        self.selected_timeline_keys = list(self.selected_timelines.keys())
 
+    def zoom_to_dates(self, from_dt: datetime, to_dt: datetime, refilter_based_on_date_range=False) -> bool:
+        """
+        Returns True if there was a material change.
+        """
         # If the from and to are in reserve chronological order, correct it
         if from_dt > to_dt:
             t_dt = to_dt
@@ -232,14 +275,19 @@ class EventsInspector:
             if from_dt < self.absolute_timeline_start:
                 from_dt = self.absolute_timeline_start
 
+        material_change = False
+        if self.zoom_timeline_start != from_dt or self.zoom_timeline_stop != to_dt or refilter_based_on_date_range:
+            material_change = True
+
         self.zoom_timeline_start = from_dt
         self.zoom_timeline_stop = to_dt
         if refilter_based_on_date_range:
             self.apply_collapse_filter()
-        self.on_zoom_resize(self.current_timeline_width)
+        self.on_zoom_resize(self.current_visible_timeline_width)
+        return material_change
 
     def get_current_timeline_width(self):
-        return self.current_timeline_width
+        return self.current_visible_timeline_width
 
     def calculate_pixels_per_second(self, timeline_width: int) -> float:
         """
@@ -255,34 +303,14 @@ class EventsInspector:
 
     def current_interval_width(self, pd_interval_row: pandas.Series) -> float:
         return self.calculate_interval_pixel_width(
-            timeline_width=self.current_timeline_width,
+            timeline_width=self.current_visible_timeline_width,
             pd_interval_row=pd_interval_row
         )
 
-    def calculate_left_offset(self, timeline_width: int, pd_interval_row: pandas.Series) -> float:
-        from_dt = pd_interval_row['from']
-        if self.zoom_timeline_start > from_dt:
-            from_dt = self.zoom_timeline_start
-        return seconds_between(self.zoom_timeline_start, from_dt) * self.calculate_pixels_per_second(timeline_width)
-
-    def current_interval_left_offset(self, pd_interval_row: pandas.Series) -> float:
-        """
-        How far from the left side of the beginning of the zoom timeline should the
-        interval begin to render.
-        :param pd_interval_row: A row indicating an interval
-        """
-        return seconds_between(self.zoom_timeline_start, pd_interval_row['from']) * self.current_pixels_per_second_in_timeline
-
-    def left_offset_from_datetime(self, timeline_start: pd.Timestamp, position_dt: pd.Timestamp, timeline_width: int) -> float:
-        return seconds_between(timeline_start, position_dt) * self.calculate_pixels_per_second(
-            timeline_width)
-
-    def left_offset_to_datetime(self, left_offset) -> datetime:
+    def zoom_left_offset_to_datetime(self, left_offset_px) -> datetime:
         """
         Given an offset from the left side of the zoom timeline, what datetime is
         the location approximating?
-        :param left_offset: distance in pixels from the start of the zoom timeline.
+        :param left_offset_px: distance in pixels from the start of the zoom timeline.
         """
-        return self.zoom_timeline_start + timedelta(microseconds=int(left_offset / self.current_pixels_per_second_in_timeline * 1000000))
-
-
+        return left_offset_to_datetime(self.zoom_timeline_start, left_offset_px, pixels_per_second=self.current_pixels_per_second_in_timeline)

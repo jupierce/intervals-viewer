@@ -340,12 +340,28 @@ class IntervalsTimeline:
                     ]
             else:
                 # This timeline is under the mouse.
-                return [
+                decorations = list()
+                decorations.append(
                     LineInfo((0, self.last_transform_y + self.timeline_row_height // 2),
                              (safe_width, self.last_transform_y + self.timeline_row_height // 2),
                              (211, 155, 203, 120),
                              line_width=self.timeline_row_height)
-                ]
+                )
+
+                # If the mouse is over this timeline and over an interval rectangle, highlight the interval
+                if mouse_over_intervals_timeline_entry:
+                    point_offset = mouse_over_intervals_timeline_entry.rect_offset * 4  # There are four points in the list per interval/rectangle
+                    top_left, top_right, bottom_right, bottom_left = self.transformed_rect_list[point_offset:point_offset + 4]
+                    top_left = [top_left[0] - 2, top_left[1] + 2]
+                    top_right = [top_right[0] - 2, top_right[1] + 2]
+                    decorations.append(
+                    LineInfo((top_left[0], self.last_transform_y + self.timeline_row_height // 2 + 2),
+                             (top_right[0], self.last_transform_y + self.timeline_row_height // 2 + 2),
+                             arcade.color.WHITE,
+                             line_width=self.timeline_row_height)
+                    )
+
+                return decorations
 
         return []
 
@@ -1361,6 +1377,9 @@ class GraphSection(arcade.Section):
         overall_lower_decorations_change = False
         lower_decorations = list()
         for row_offset, interval_timeline in enumerate(self.visible_interval_timelines):
+            # When considering how this lru_cache works, keep in mind that if the new IntervalsTimeline objects
+            # are created (e.g. because row height changes), the new instances will have a different `self` value,
+            # and there will be cache misses.
             decoration_shapes, changed = interval_timeline.get_lower_layer_decorations(
                 mouse_over_intervals_timeline=detail_section_ref.mouse_over_intervals_timeline,
                 mouse_over_intervals_timeline_entry=detail_section_ref.get_focused_timeline_entry_under_mouse(),
@@ -1376,6 +1395,7 @@ class GraphSection(arcade.Section):
             for shape in lower_decorations:
                 self.buffered_low_layer_decorations.append(shape)
 
+        self.buffered_low_layer_decorations.center_x = self.buffered_graph.center_x
         self.buffered_low_layer_decorations.draw()
         self.buffered_graph.draw()
 
